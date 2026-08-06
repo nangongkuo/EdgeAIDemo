@@ -1,0 +1,51 @@
+plugins {
+  id 'com.android.library'
+  id 'org.jetbrains.kotlin.android'
+}
+
+android {
+  namespace rootProject.ext.android.applicationId + '.app'
+  compileSdk rootProject.ext.android.compileSdkVersion
+
+  defaultConfig {
+    minSdk rootProject.ext.android.minSdkVersion
+    targetSdk rootProject.ext.android.targetSdkVersion
+
+    testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
+    consumerProguardFiles "consumer-rules.pro"
+  }
+
+  buildTypes {
+    release {
+      minifyEnabled false
+      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+    }
+  }
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_1_8
+    targetCompatibility JavaVersion.VERSION_1_8
+  }
+  kotlinOptions {
+    jvmTarget = '1.8'
+  }
+
+  buildFeatures {
+    dataBinding true
+  }
+}
+
+dependencies {
+  implementation "androidx.core:core-ktx:$rootProject.ext.coreKtxVersion"
+  implementation "androidx.appcompat:appcompat:$rootProject.ext.appcompatVersion"
+  implementation "com.google.android.material:material:$rootProject.ext.materialVersion"
+  implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+
+  // ViewPager2
+  implementation "androidx.viewpager2:viewpager2:$rootProject.ext.viewPager2Version"
+
+  testImplementation 'junit:junit:4.13.2'
+  androidTestImplementation 'com.android.support.test:runner:1.0.2'
+  androidTestImplementation 'com.android.support.test.espresso:espresso-core:3.0.2'
+
+  implementation project(":base")
+}

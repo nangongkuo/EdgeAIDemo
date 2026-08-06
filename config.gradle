@@ -1,0 +1,46 @@
+ext{
+  versionCode = 1000
+  versionName = "1.0.0"
+
+  applicationId = "com.zjf.edgeai"
+
+  android = [
+      versionCode: versionCode,
+      versionName: versionName,
+      applicationId: applicationId,
+      compileSdkVersion: 34,
+      minSdkVersion: 21,
+      targetSdkVersion: 34]
+
+  coreKtxVersion = "1.8.0"
+  kotlinxCoroutinesVersion = "1.6.4"
+  // google
+  activityKtxVersion = "1.7.0-beta02"
+  fragmentKtxVersion = "1.5.0"
+  lifecycleVersion = "2.2.0"
+  billingVersion = "6.0.0"
+  liveDataVersion = "2.4.0"
+  appcompatVersion = "1.6.1"
+  materialVersion = "1.9.0"
+  constraintlayoutVersion = "2.1.4"
+  roomMVersion = "2.5.0"
+//  roomMVersion = "2.3.0"
+  viewPager2Version = "1.1.0-beta01"
+  gsonVersion = "2.8.8"
+
+  glideVersion = "4.16.0"
+
+  BRAVVersion = "3.0.14"
+
+  // 自己封装的工具库
+  yfUtilsVersion = '1.0.0-alpha13'
+  yfResVersion = '1.0.0-alpha09'
+  yfUiVersion = '1.0.0-alpha23'
+  yfSpVersion = '1.0.0-alpha02'
+  yfEvaluateVersion = '1.0.0-alpha04'
+  yfPlayerVersion = '1.0.0-alpha05'
+
+
+  // 三方库
+  permissionxVersion = "1.7.1"
+}

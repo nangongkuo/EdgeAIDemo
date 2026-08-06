@@ -1,0 +1,81 @@
+plugins {
+  id 'com.android.library'
+  id 'org.jetbrains.kotlin.android'
+}
+
+android {
+  namespace rootProject.ext.android.applicationId + '.base'
+  compileSdk rootProject.ext.android.compileSdkVersion
+
+  defaultConfig {
+    minSdk rootProject.ext.android.minSdkVersion
+    targetSdk rootProject.ext.android.targetSdkVersion
+
+    testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
+    consumerProguardFiles "consumer-rules.pro"
+  }
+
+  buildTypes {
+    release {
+      minifyEnabled false
+      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+    }
+  }
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_1_8
+    targetCompatibility JavaVersion.VERSION_1_8
+  }
+  kotlinOptions {
+    jvmTarget = '1.8'
+  }
+
+  buildFeatures {
+    dataBinding true
+  }
+}
+
+dependencies {
+  implementation "androidx.core:core-ktx:$rootProject.ext.coreKtxVersion"
+  implementation "androidx.appcompat:appcompat:$rootProject.ext.appcompatVersion"
+  implementation "com.google.android.material:material:$rootProject.ext.materialVersion"
+  implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+  testImplementation 'junit:junit:4.13.2'
+  androidTestImplementation 'com.android.support.test:runner:1.0.2'
+  androidTestImplementation 'com.android.support.test.espresso:espresso-core:3.0.2'
+
+  // androidx
+  api "androidx.activity:activity:$rootProject.ext.activityKtxVersion"
+  api "androidx.activity:activity-ktx:$rootProject.ext.activityKtxVersion"
+  api "androidx.fragment:fragment-ktx:$rootProject.ext.fragmentKtxVersion"
+  api "androidx.lifecycle:lifecycle-extensions:$rootProject.ext.lifecycleVersion"
+  api "androidx.lifecycle:lifecycle-livedata-ktx:$rootProject.ext.liveDataVersion"
+
+  api "androidx.viewpager2:viewpager2:$rootProject.ext.viewPager2Version"
+
+  // BRAV
+  api "io.github.cymchad:BaseRecyclerViewAdapterHelper:$rootProject.ext.BRAVVersion"
+
+  // google
+  api "com.github.bumptech.glide:glide:$rootProject.ext.glideVersion"
+  annotationProcessor "com.github.bumptech.glide:compiler:$rootProject.ext.glideVersion"
+
+  // 自己封装的库
+  api "io.github.nangongkuo:yflib-utils:$rootProject.ext.yfUtilsVersion"
+  api "io.github.nangongkuo:yflib-res:$rootProject.ext.yfResVersion"
+  api("io.github.nangongkuo:yflib-ui:$rootProject.ext.yfUiVersion"){
+    exclude group: 'com.google.firebase', module: 'firebase-analytics-ktx'
+  }
+  api "io.github.nangongkuo:yflib-sp:$rootProject.ext.yfSpVersion"
+  api "io.github.nangongkuo:yflib-evaluate:$rootProject.ext.yfEvaluateVersion"
+  api "io.github.nangongkuo:yflib-player:$rootProject.ext.yfPlayerVersion"
+
+  api "com.guolindev.permissionx:permissionx:$rootProject.ext.permissionxVersion"
+  api "com.google.code.gson:gson:$rootProject.ext.gsonVersion"
+
+  api 'com.google.code.gson:gson:2.8.9'
+  api 'com.squareup.retrofit2:retrofit:2.9.0'
+  api 'com.squareup.retrofit2:converter-gson:2.9.0'
+  api 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.4.0'
+  api 'androidx.activity:activity-ktx:1.4.0'
+  api 'com.squareup.okhttp3:okhttp:4.9.3'
+}
