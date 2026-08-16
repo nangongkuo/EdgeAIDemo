@@ -1,0 +1,302 @@
+package com.zjf.edgeai.runtime
+
+import android.content.Context
+import android.os.Build
+import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Contents
+import com.google.ai.edge.litertlm.Conversation
+import com.google.ai.edge.litertlm.ConversationConfig
+import com.google.ai.edge.litertlm.Engine
+import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.ExperimentalApi
+import com.google.ai.edge.litertlm.SamplerConfig
+import com.zjf.edgeai.runtime.model.ModelDescriptor
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+
+@OptIn(ExperimentalApi::class)
+class LiteRtLmRuntime(context: Context) : EdgeAiRuntime {
+    companion object {
+        private const val MAX_OUTPUT_TOKENS = 512
+        private const val ERROR_LIMIT = 600
+        private const val SYSTEM_INSTRUCTION =
+            "You are a helpful assistant running completely on this Android device."
+    }
+
+    private val appContext = context.applicationContext
+    private val executor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "lite-rt-lm-runtime")
+    }
+    private val dispatcher = executor.asCoroutineDispatcher()
+    private val runtimeScope = CoroutineScope(SupervisorJob() + dispatcher)
+    private val generationActive = AtomicBoolean(false)
+
+    private val _state = MutableStateFlow<RuntimeState>(RuntimeState.Unloaded)
+    override val state: StateFlow<RuntimeState> = _state
+
+    private val _diagnostics = MutableStateFlow(environmentDiagnostics())
+    override val diagnostics: StateFlow<RuntimeDiagnostics> = _diagnostics
+
+    private var engine: Engine? = null
+    private var conversation: Conversation? = null
+    private var activeModel: ModelDescriptor? = null
+    private var readyState: RuntimeState.Ready? = null
+    private var closed = false
+
+    override suspend fun initialize(model: ModelDescriptor, preferred: RuntimeBackend) {
+        withContext(dispatcher) {
+            check(!closed) { "运行时已关闭" }
+            check(!generationActive.get()) { "生成期间不能重新初始化模型" }
+            closeNative()
+            activeModel = model
+            readyState = null
+            _state.value = RuntimeState.Initializing(preferred)
+            _diagnostics.value = environmentDiagnostics().withModel(model).copy(
+                preferredBackend = preferred
+            )
+
+            try {
+                val selection = selectRuntimeBackend(
+                    preferred = preferred,
+                    gpuPreflightFailure = emulatorGpuPreflightFailure(
+                        preferred = preferred,
+                        device = currentDeviceSignature()
+                    )
+                ) { backend ->
+                    initializeBackend(model, backend)
+                }
+                markReady(
+                    model = model,
+                    preferred = preferred,
+                    effective = selection.effectiveBackend,
+                    fallbackReason = selection.gpuFailure?.let {
+                        sanitizeError(it, model.absolutePath)
+                    }
+                )
+            } catch (fallback: BackendFallbackException) {
+                closeNative()
+                val gpuReason = sanitizeError(fallback.gpuFailure, model.absolutePath)
+                val cpuReason = sanitizeError(fallback.cpuFailure, model.absolutePath)
+                val message = "GPU 初始化失败：$gpuReason；CPU 回退失败：$cpuReason"
+                _state.value = RuntimeState.Error(message)
+                _diagnostics.value = _diagnostics.value.copy(fallbackReason = message)
+                throw RuntimeInitializationException(message, fallback.cpuFailure)
+            } catch (failure: Throwable) {
+                closeNative()
+                val message = "CPU 初始化失败：${sanitizeError(failure, model.absolutePath)}"
+                _state.value = RuntimeState.Error(message)
+                throw RuntimeInitializationException(message, failure)
+            }
+        }
+    }
+
+    override fun generate(prompt: String): Flow<GenerationEvent> = flow {
+        if (prompt.isBlank()) {
+            emit(GenerationEvent.Failed("请输入问题"))
+            return@flow
+        }
+        if (!generationActive.compareAndSet(false, true)) {
+            emit(GenerationEvent.Failed("已有生成任务正在运行"))
+            return@flow
+        }
+
+        val currentConversation = conversation
+        val currentReady = readyState
+        if (currentConversation == null || currentReady == null) {
+            generationActive.set(false)
+            emit(GenerationEvent.Failed("请先加载模型"))
+            return@flow
+        }
+
+        _state.value = RuntimeState.Generating(currentReady.effectiveBackend)
+        try {
+            currentConversation.sendMessageAsync(prompt).collect { message ->
+                val text = message.toString()
+                if (text.isNotEmpty()) emit(GenerationEvent.Delta(text))
+            }
+            updateBenchmark(currentConversation)
+            emit(GenerationEvent.Completed(_diagnostics.value))
+        } catch (cancelled: CancellationException) {
+            runCatching { currentConversation.cancelProcess() }
+            throw cancelled
+        } catch (failure: Throwable) {
+            emit(GenerationEvent.Failed(sanitizeError(failure, activeModel?.absolutePath)))
+        } finally {
+            generationActive.set(false)
+            _state.value = if (engine != null && conversation != null) {
+                readyState ?: RuntimeState.Unloaded
+            } else {
+                RuntimeState.Unloaded
+            }
+        }
+    }.flowOn(dispatcher)
+
+    override fun cancel() {
+        val ready = readyState ?: return
+        if (!generationActive.get()) return
+        _state.value = RuntimeState.Cancelling(ready.effectiveBackend)
+        runtimeScope.runCatchingLaunch {
+            conversation?.cancelProcess()
+        }
+    }
+
+    override suspend fun resetConversation() {
+        withContext(dispatcher) {
+            check(!generationActive.get()) { "请先停止当前生成" }
+            val currentEngine = engine ?: throw IllegalStateException("请先加载模型")
+            conversation?.close()
+            conversation = currentEngine.createConversation(defaultConversationConfig())
+            _state.value = readyState ?: RuntimeState.Unloaded
+            _diagnostics.value = _diagnostics.value.copy(
+                timeToFirstTokenSeconds = null,
+                prefillTokenCount = null,
+                decodeTokenCount = null,
+                prefillTokensPerSecond = null,
+                decodeTokensPerSecond = null,
+                totalConversationTokens = null
+            )
+        }
+    }
+
+    override suspend fun unload() {
+        withContext(dispatcher) {
+            if (generationActive.get()) runCatching { conversation?.cancelProcess() }
+            closeNative()
+            generationActive.set(false)
+            activeModel = null
+            readyState = null
+            _state.value = RuntimeState.Unloaded
+            _diagnostics.value = environmentDiagnostics()
+        }
+    }
+
+    override fun close() {
+        if (closed) return
+        runBlocking { unload() }
+        closed = true
+        runtimeScope.cancel()
+        dispatcher.close()
+        executor.shutdown()
+    }
+
+    private fun initializeBackend(model: ModelDescriptor, backend: RuntimeBackend) {
+        val cacheDir = File(appContext.filesDir, "litertlm-cache/${model.sha256}").apply { mkdirs() }
+        val candidate = Engine(
+            EngineConfig(
+                modelPath = model.absolutePath,
+                backend = backend.toSdkBackend(),
+                cacheDir = cacheDir.absolutePath
+            )
+        )
+        try {
+            candidate.initialize()
+            val candidateConversation = candidate.createConversation(defaultConversationConfig())
+            engine = candidate
+            conversation = candidateConversation
+        } catch (failure: Throwable) {
+            runCatching { candidate.close() }
+            throw failure
+        }
+    }
+
+    private fun markReady(
+        model: ModelDescriptor,
+        preferred: RuntimeBackend,
+        effective: RuntimeBackend,
+        fallbackReason: String?
+    ) {
+        val ready = RuntimeState.Ready(preferred, effective, fallbackReason)
+        readyState = ready
+        _state.value = ready
+        val initialized = _diagnostics.value.withModel(model).copy(
+            preferredBackend = preferred,
+            effectiveBackend = effective,
+            fallbackReason = fallbackReason
+        )
+        _diagnostics.value = runCatching {
+            val benchmark = conversation?.getBenchmarkInfo()
+            initialized.copy(initializationSeconds = benchmark?.initTimeInSecond?.validMetric())
+        }.getOrDefault(initialized)
+    }
+
+    private fun updateBenchmark(currentConversation: Conversation) {
+        _diagnostics.value = runCatching {
+            val benchmark = currentConversation.getBenchmarkInfo()
+            _diagnostics.value.copy(
+                initializationSeconds = benchmark.initTimeInSecond.validMetric(),
+                timeToFirstTokenSeconds = benchmark.timeToFirstTokenInSecond.validMetric(),
+                prefillTokenCount = benchmark.lastPrefillTokenCount.validCount(),
+                decodeTokenCount = benchmark.lastDecodeTokenCount.validCount(),
+                prefillTokensPerSecond = benchmark.lastPrefillTokensPerSecond.validMetric(),
+                decodeTokensPerSecond = benchmark.lastDecodeTokensPerSecond.validMetric(),
+                totalConversationTokens = currentConversation.getTokenCount().validCount()
+            )
+        }.getOrDefault(_diagnostics.value)
+    }
+
+    private fun closeNative() {
+        runCatching { conversation?.close() }
+        conversation = null
+        runCatching { engine?.close() }
+        engine = null
+    }
+
+    private fun defaultConversationConfig() = ConversationConfig(
+        systemInstruction = Contents.of(SYSTEM_INSTRUCTION),
+        samplerConfig = SamplerConfig(topK = 10, topP = 0.95, temperature = 0.8, seed = 0),
+        maxOutputToken = MAX_OUTPUT_TOKENS
+    )
+
+    private fun RuntimeBackend.toSdkBackend(): Backend = when (this) {
+        RuntimeBackend.GPU -> Backend.GPU()
+        RuntimeBackend.CPU -> Backend.CPU()
+    }
+
+    private fun environmentDiagnostics() = RuntimeDiagnostics(
+        deviceManufacturer = Build.MANUFACTURER,
+        deviceModel = Build.MODEL,
+        androidApi = Build.VERSION.SDK_INT,
+        supportedAbis = Build.SUPPORTED_ABIS.toList()
+    )
+
+    private fun currentDeviceSignature() = AndroidDeviceSignature(
+        fingerprint = Build.FINGERPRINT,
+        model = Build.MODEL,
+        manufacturer = Build.MANUFACTURER,
+        brand = Build.BRAND,
+        device = Build.DEVICE,
+        hardware = Build.HARDWARE
+    )
+
+    private fun RuntimeDiagnostics.withModel(model: ModelDescriptor) = copy(
+        modelName = model.displayName,
+        modelSha256 = model.sha256,
+        modelSizeBytes = model.sizeBytes
+    )
+
+    private fun sanitizeError(failure: Throwable?, modelPath: String?): String {
+        val raw = failure?.message ?: failure?.javaClass?.simpleName ?: "未知错误"
+        val sanitized = if (modelPath.isNullOrBlank()) raw else raw.replace(modelPath, "<model>")
+        return sanitized.take(ERROR_LIMIT)
+    }
+
+    private fun Double.validMetric(): Double? = takeIf { it.isFinite() && it >= 0.0 }
+    private fun Int.validCount(): Int? = takeIf { it >= 0 }
+}
+
+private fun CoroutineScope.runCatchingLaunch(block: suspend () -> Unit) =
+    launch { runCatching { block() } }

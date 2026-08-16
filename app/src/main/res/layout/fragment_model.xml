@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+  android:fillViewport="true">
+
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <TextView
+      style="@style/TextAppearance.MaterialComponents.Headline6"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:text="@string/model_section" />
+
+    <TextView
+      android:id="@+id/modelName"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="12dp"
+      android:text="@string/no_model"
+      android:textStyle="bold" />
+
+    <TextView
+      android:id="@+id/modelDetails"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="8dp"
+      android:text="@string/model_import_hint"
+      android:textIsSelectable="true" />
+
+    <com.google.android.material.button.MaterialButton
+      android:id="@+id/importButton"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="16dp"
+      android:text="@string/import_model" />
+
+    <ProgressBar
+      android:id="@+id/importProgress"
+      style="?android:attr/progressBarStyleHorizontal"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="8dp"
+      android:max="100"
+      android:visibility="gone" />
+
+    <TextView
+      android:id="@+id/importStatus"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="4dp" />
+
+    <TextView
+      style="@style/TextAppearance.MaterialComponents.Headline6"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="24dp"
+      android:text="@string/backend_section" />
+
+    <RadioGroup
+      android:id="@+id/backendGroup"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:orientation="horizontal">
+
+      <RadioButton
+        android:id="@+id/gpuRadio"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:checked="true"
+        android:text="@string/backend_gpu" />
+
+      <RadioButton
+        android:id="@+id/cpuRadio"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="24dp"
+        android:text="@string/backend_cpu" />
+    </RadioGroup>
+
+    <TextView
+      android:id="@+id/runtimeStatus"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="12dp"
+      android:background="@drawable/bg_status"
+      android:padding="12dp"
+      android:text="@string/runtime_unloaded" />
+
+    <LinearLayout
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="16dp"
+      android:orientation="horizontal">
+
+      <com.google.android.material.button.MaterialButton
+        android:id="@+id/initializeButton"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:text="@string/initialize_model" />
+
+      <com.google.android.material.button.MaterialButton
+        android:id="@+id/unloadButton"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_weight="1"
+        android:text="@string/unload_model" />
+    </LinearLayout>
+
+    <com.google.android.material.button.MaterialButton
+      android:id="@+id/deleteButton"
+      style="@style/Widget.MaterialComponents.Button.TextButton"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="8dp"
+      android:text="@string/delete_model"
+      android:textColor="@color/error" />
+  </LinearLayout>
+</ScrollView>

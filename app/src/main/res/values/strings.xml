@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="app_name">Edge AI Demo</string>
+  <string name="tab_model">模型</string>
+  <string name="tab_chat">对话</string>
+  <string name="tab_diagnostics">诊断</string>
+  <string name="model_section">LiteRT-LM 模型</string>
+  <string name="backend_section">推理后端</string>
+  <string name="no_model">未导入模型</string>
+  <string name="model_import_hint">请从本地选择一个 .litertlm 文件。模型将复制到应用私有目录，不会上传。</string>
+  <string name="model_details">大小：%1$s\nSHA-256：%2$s\n导入时间：%3$s</string>
+  <string name="import_model">导入 / 替换模型</string>
+  <string name="delete_model">删除模型</string>
+  <string name="delete_model_confirmation">将卸载运行时并删除应用私有目录中的模型副本。原始下载文件不会被删除。</string>
+  <string name="initialize_model">初始化</string>
+  <string name="unload_model">卸载</string>
+  <string name="backend_gpu">GPU（失败回退 CPU）</string>
+  <string name="backend_cpu">CPU</string>
+  <string name="runtime_unloaded">运行时未加载</string>
+  <string name="runtime_initializing">正在使用 %1$s 初始化…</string>
+  <string name="runtime_ready">运行时已就绪 · %1$s</string>
+  <string name="runtime_ready_fallback">运行时已就绪 · %1$s\nGPU 回退原因：%2$s</string>
+  <string name="runtime_generating">正在使用 %1$s 生成…</string>
+  <string name="runtime_cancelling">正在停止生成…</string>
+  <string name="runtime_error">运行时错误：%1$s</string>
+  <string name="chat_not_ready">请先在模型页初始化模型</string>
+  <string name="chat_empty_hint">模型就绪后，在这里验证完全离线的多轮对话。</string>
+  <string name="prompt_hint">输入问题</string>
+  <string name="send">发送</string>
+  <string name="stop">停止</string>
+  <string name="clear_chat">清空</string>
+  <string name="role_user">你</string>
+  <string name="role_assistant">设备端模型</string>
+  <string name="diagnostics_unavailable">诊断信息不可用</string>
+</resources>

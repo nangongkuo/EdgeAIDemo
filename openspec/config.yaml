@@ -1,0 +1,22 @@
+schema: spec-driven
+
+context: |
+  EdgeAIDemo is an Android 12+ ARM64 validation application for Google AI Edge LiteRT-LM.
+  The applicationId is com.zjf.edgeai. Production code is Kotlin with XML Views and AndroidX.
+  The project contains an app UI module and an edge-ai Android library that isolates model storage
+  and LiteRT-LM runtime integration. A license-approved .litertlm model is packaged as an uncompressed
+  app asset for local distribution, copied transactionally to app-private storage on first launch, and
+  initialized automatically. Users may still replace it through SAF. Model binaries and access tokens
+  remain local build inputs and must never be committed to the Git repository.
+  LiteRT-LM JNI lifecycle calls must be serialized and Engine/Conversation resources must be closed explicitly.
+  Emulator runs validate UI and error handling only; inference acceptance requires Android 12+ ARM64 hardware.
+
+rules:
+  proposal:
+    - State user-visible validation outcomes and explicit non-goals.
+  specs:
+    - Every requirement must use SHALL or MUST and include success and failure scenarios where applicable.
+  design:
+    - Record module ownership, threading, native resource lifecycle, GPU fallback, and model storage decisions.
+  tasks:
+    - Order tasks so OpenSpec validation and automated tests are run before physical-device acceptance.

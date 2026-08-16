@@ -1,0 +1,38 @@
+plugins {
+  id 'com.android.library'
+  id 'org.jetbrains.kotlin.android'
+}
+
+android {
+  namespace 'com.zjf.edgeai.runtime'
+  compileSdk rootProject.ext.android.compileSdkVersion
+
+  defaultConfig {
+    minSdk rootProject.ext.android.minSdkVersion
+    consumerProguardFiles 'consumer-rules.pro'
+    buildConfigField 'String', 'LITERT_LM_VERSION', '"' + rootProject.ext.liteRtLmVersion + '"'
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  kotlinOptions {
+    jvmTarget = '17'
+  }
+
+  buildFeatures {
+    buildConfig true
+  }
+}
+
+dependencies {
+  implementation "androidx.core:core-ktx:$rootProject.ext.coreKtxVersion"
+  implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:$rootProject.ext.coroutinesVersion"
+  implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:$rootProject.ext.coroutinesVersion"
+  api "com.google.ai.edge.litertlm:litertlm-android:$rootProject.ext.liteRtLmVersion"
+
+  testImplementation 'junit:junit:4.13.2'
+  testImplementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:$rootProject.ext.coroutinesVersion"
+}

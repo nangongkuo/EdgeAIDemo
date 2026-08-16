@@ -14,7 +14,11 @@ android {
     versionCode rootProject.ext.android.versionCode
     versionName rootProject.ext.android.versionName
 
-    testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
+    testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+    ndk {
+      abiFilters 'arm64-v8a'
+    }
   }
 
   buildTypes {
@@ -24,15 +28,19 @@ android {
     }
   }
   compileOptions {
-    sourceCompatibility JavaVersion.VERSION_1_8
-    targetCompatibility JavaVersion.VERSION_1_8
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
   }
   kotlinOptions {
-    jvmTarget = '1.8'
+    jvmTarget = '17'
   }
 
   buildFeatures {
-    dataBinding true
+    viewBinding true
+  }
+
+  androidResources {
+    noCompress += ['litertlm']
   }
 }
 
@@ -40,11 +48,88 @@ dependencies {
   implementation "androidx.core:core-ktx:$rootProject.ext.coreKtxVersion"
   implementation "androidx.appcompat:appcompat:$rootProject.ext.appcompatVersion"
   implementation "com.google.android.material:material:$rootProject.ext.materialVersion"
-  implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
-  testImplementation 'junit:junit:4.13.2'
-  androidTestImplementation 'com.android.support.test:runner:1.0.2'
-  androidTestImplementation 'com.android.support.test.espresso:espresso-core:3.0.2'
+  implementation "androidx.activity:activity-ktx:$rootProject.ext.activityKtxVersion"
+  implementation "androidx.fragment:fragment-ktx:$rootProject.ext.fragmentKtxVersion"
+  implementation "androidx.lifecycle:lifecycle-runtime-ktx:$rootProject.ext.lifecycleVersion"
+  implementation "androidx.lifecycle:lifecycle-viewmodel-ktx:$rootProject.ext.lifecycleVersion"
+  implementation "androidx.recyclerview:recyclerview:$rootProject.ext.recyclerViewVersion"
+  implementation "androidx.viewpager2:viewpager2:$rootProject.ext.viewPager2Version"
+  implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:$rootProject.ext.coroutinesVersion"
+  implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:$rootProject.ext.coroutinesVersion"
+  implementation project(':edge-ai')
 
-  implementation project(":biz-app")
-  implementation project(":base")
+  testImplementation 'junit:junit:4.13.2'
+  testImplementation 'androidx.arch.core:core-testing:2.2.0'
+  testImplementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:$rootProject.ext.coroutinesVersion"
+  androidTestImplementation 'androidx.test:runner:1.6.2'
+  androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+  androidTestImplementation 'androidx.test.espresso:espresso-core:3.6.1'
+}
+
+def bundledGemmaModel = file(
+    'src/main/assets/models/Gemma3-1B-IT_multi-prefill-seq_q4_ekv4096.litertlm'
+)
+def bundledGemmaSizeBytes = 584417280L
+def bundledGemmaSha256 = '1325ae366d31950f137c9c357b9fa89448b176d76998180c08ceaca78bba98be'
+
+tasks.register('verifyBundledGemmaModel') {
+  group = 'verification'
+  description = 'Verifies the locally provisioned, license-approved Gemma asset before producing a bundled APK.'
+  inputs.file(bundledGemmaModel)
+
+  doLast {
+    if (!bundledGemmaModel.isFile()) {
+      throw new GradleException("Bundled Gemma model is missing: ${bundledGemmaModel}")
+    }
+    if (bundledGemmaModel.length() != bundledGemmaSizeBytes) {
+      throw new GradleException(
+          "Unexpected Gemma model size: ${bundledGemmaModel.length()} (expected ${bundledGemmaSizeBytes})"
+      )
+    }
+
+    def digest = java.security.MessageDigest.getInstance('SHA-256')
+    bundledGemmaModel.withInputStream { input ->
+      byte[] buffer = new byte[64 * 1024]
+      int count
+      while ((count = input.read(buffer)) != -1) {
+        digest.update(buffer, 0, count)
+      }
+    }
+    def actualSha256 = digest.digest().collect { String.format('%02x', it & 0xff) }.join()
+    if (actualSha256 != bundledGemmaSha256) {
+      throw new GradleException(
+          "Unexpected Gemma model SHA-256: ${actualSha256} (expected ${bundledGemmaSha256})"
+      )
+    }
+  }
+}
+
+tasks.register('verifyLiteRtLmCoroutineAbi') {
+  group = 'verification'
+  description = 'Verifies the coroutine ABI required by LiteRT-LM completion callbacks.'
+
+  doLast {
+    def expectedVersion = rootProject.ext.coroutinesVersion
+    def resolvedComponents = configurations.debugRuntimeClasspath
+        .incoming
+        .resolutionResult
+        .allComponents
+
+    [
+        'kotlinx-coroutines-core',
+        'kotlinx-coroutines-android'
+    ].each { moduleName ->
+      def versions = resolvedComponents
+          .collect { it.moduleVersion }
+          .findAll { it != null && it.group == 'org.jetbrains.kotlinx' && it.name == moduleName }
+          .collect { it.version }
+          .toSet()
+
+      if (versions.size() != 1 || !versions.contains(expectedVersion)) {
+        throw new GradleException(
+            "LiteRT-LM requires ${moduleName}:${expectedVersion}; resolved ${versions}"
+        )
+      }
+    }
+  }
 }
