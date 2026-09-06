@@ -46,23 +46,53 @@ class EdgeAiViewModelTest {
     fun streamingDeltasUpdateOneAssistantMessage() = runTest {
         val runtime = FakeRuntime().apply {
             generation = flowOf(
-                GenerationEvent.Delta("Edge "),
+                GenerationEvent.Delta("设备端 "),
                 GenerationEvent.Delta("AI"),
                 GenerationEvent.Completed(diagnostics.value)
             )
         }
         val viewModel = EdgeAiViewModel(FakeModelStore(selected = testModel), runtime)
 
-        viewModel.sendPrompt("hello")
+        viewModel.sendPrompt("你好，Edge AI")
         advanceUntilIdle()
 
         val messages = viewModel.uiState.value.messages
         assertEquals(2, messages.size)
         assertEquals(ChatRole.USER, messages[0].role)
-        assertEquals("hello", messages[0].text)
+        assertEquals("你好，Edge AI", messages[0].text)
         assertEquals(ChatRole.ASSISTANT, messages[1].role)
-        assertEquals("Edge AI", messages[1].text)
+        assertEquals("设备端 AI", messages[1].text)
         assertFalse(messages[1].streaming)
+    }
+
+    @Test
+    fun mixedLanguagePromptIsForwardedAndRenderedWithoutRewriting() = runTest {
+        val runtime = FakeRuntime().apply {
+            generation = flowOf(GenerationEvent.Delta("这是中文说明。"))
+        }
+        val viewModel = EdgeAiViewModel(FakeModelStore(selected = testModel), runtime)
+        val prompt = "  请 explain JVM 的 GC，并保留 Java  "
+
+        viewModel.sendPrompt(prompt)
+        advanceUntilIdle()
+
+        assertEquals(listOf(prompt), runtime.receivedPrompts)
+        assertEquals(prompt, viewModel.uiState.value.messages.first().text)
+        assertEquals(ChatRole.USER, viewModel.uiState.value.messages.first().role)
+        assertEquals("这是中文说明。", viewModel.uiState.value.messages.last().text)
+        assertEquals(ChatRole.ASSISTANT, viewModel.uiState.value.messages.last().role)
+    }
+
+    @Test
+    fun allWhitespacePromptDoesNotStartGeneration() = runTest {
+        val runtime = FakeRuntime()
+        val viewModel = EdgeAiViewModel(FakeModelStore(selected = testModel), runtime)
+
+        viewModel.sendPrompt(" \n\t ")
+        advanceUntilIdle()
+
+        assertTrue(runtime.receivedPrompts.isEmpty())
+        assertTrue(viewModel.uiState.value.messages.isEmpty())
     }
 
     @Test
@@ -147,6 +177,7 @@ class EdgeAiViewModelTest {
             )
         )
         var generation: Flow<GenerationEvent> = emptyFlow()
+        val receivedPrompts = mutableListOf<String>()
         var resetCalled = false
         var initializedModel: ModelDescriptor? = null
         var initializedBackend: RuntimeBackend? = null
@@ -156,7 +187,10 @@ class EdgeAiViewModelTest {
             initializedBackend = preferred
             mutableState.value = ready
         }
-        override fun generate(prompt: String): Flow<GenerationEvent> = generation
+        override fun generate(prompt: String): Flow<GenerationEvent> {
+            receivedPrompts += prompt
+            return generation
+        }
         override fun cancel() = Unit
         override suspend fun resetConversation() {
             resetCalled = true

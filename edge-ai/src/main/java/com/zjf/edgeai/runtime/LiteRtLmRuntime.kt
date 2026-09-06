@@ -3,13 +3,10 @@ package com.zjf.edgeai.runtime
 import android.content.Context
 import android.os.Build
 import com.google.ai.edge.litertlm.Backend
-import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Conversation
-import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.ExperimentalApi
-import com.google.ai.edge.litertlm.SamplerConfig
 import com.zjf.edgeai.runtime.model.ModelDescriptor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -31,10 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 @OptIn(ExperimentalApi::class)
 class LiteRtLmRuntime(context: Context) : EdgeAiRuntime {
     companion object {
-        private const val MAX_OUTPUT_TOKENS = 512
         private const val ERROR_LIMIT = 600
-        private const val SYSTEM_INSTRUCTION =
-            "You are a helpful assistant running completely on this Android device."
     }
 
     private val appContext = context.applicationContext
@@ -124,10 +118,17 @@ class LiteRtLmRuntime(context: Context) : EdgeAiRuntime {
 
         _state.value = RuntimeState.Generating(currentReady.effectiveBackend)
         try {
-            currentConversation.sendMessageAsync(prompt).collect { message ->
+            val generatedText = StringBuilder()
+            currentConversation.sendMessageAsync(ChatLanguagePolicy.userTurnPayload(prompt)).collect { message ->
                 val text = message.toString()
-                if (text.isNotEmpty()) emit(GenerationEvent.Delta(text))
+                if (text.isNotEmpty()) {
+                    generatedText.append(text)
+                    emit(GenerationEvent.Delta(text))
+                }
             }
+            ChatLanguagePolicy.literalPreservationSuffix(prompt, generatedText.toString())
+                .takeIf { it.isNotEmpty() }
+                ?.let { suffix -> emit(GenerationEvent.Delta(suffix)) }
             updateBenchmark(currentConversation)
             emit(GenerationEvent.Completed(_diagnostics.value))
         } catch (cancelled: CancellationException) {
@@ -255,11 +256,7 @@ class LiteRtLmRuntime(context: Context) : EdgeAiRuntime {
         engine = null
     }
 
-    private fun defaultConversationConfig() = ConversationConfig(
-        systemInstruction = Contents.of(SYSTEM_INSTRUCTION),
-        samplerConfig = SamplerConfig(topK = 10, topP = 0.95, temperature = 0.8, seed = 0),
-        maxOutputToken = MAX_OUTPUT_TOKENS
-    )
+    private fun defaultConversationConfig() = ChatLanguagePolicy.createConversationConfig()
 
     private fun RuntimeBackend.toSdkBackend(): Backend = when (this) {
         RuntimeBackend.GPU -> Backend.GPU()

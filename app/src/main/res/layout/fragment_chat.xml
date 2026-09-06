@@ -13,6 +13,14 @@
     android:padding="10dp"
     android:text="@string/chat_not_ready" />
 
+  <TextView
+    android:id="@+id/chatLanguagePolicy"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="6dp"
+    android:text="@string/chat_language_policy"
+    android:textAppearance="?attr/textAppearanceBody2" />
+
   <FrameLayout
     android:layout_width="match_parent"
     android:layout_height="0dp"

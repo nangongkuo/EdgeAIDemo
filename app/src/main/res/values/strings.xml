@@ -24,6 +24,7 @@
   <string name="runtime_cancelling">正在停止生成…</string>
   <string name="runtime_error">运行时错误：%1$s</string>
   <string name="chat_not_ready">请先在模型页初始化模型</string>
+  <string name="chat_language_policy">支持中文 / English / 中英混输，默认使用简体中文回答。</string>
   <string name="chat_empty_hint">模型就绪后，在这里验证完全离线的多轮对话。</string>
   <string name="prompt_hint">输入问题</string>
   <string name="send">发送</string>

@@ -188,10 +188,9 @@ class EdgeAiViewModel(
             showError("请先在模型页完成初始化")
             return
         }
-        val normalized = prompt.trim()
-        if (normalized.isEmpty()) return
+        if (prompt.isBlank()) return
 
-        val userMessage = ChatMessage(ids.incrementAndGet(), ChatRole.USER, normalized)
+        val userMessage = ChatMessage(ids.incrementAndGet(), ChatRole.USER, prompt)
         val assistantId = ids.incrementAndGet()
         val assistantMessage = ChatMessage(assistantId, ChatRole.ASSISTANT, "", streaming = true)
         _uiState.update {
@@ -202,7 +201,7 @@ class EdgeAiViewModel(
         }
 
         generationJob = viewModelScope.launch {
-            runtime.generate(normalized).collect { event ->
+            runtime.generate(prompt).collect { event ->
                 when (event) {
                     is GenerationEvent.Delta -> updateAssistant(assistantId) { current ->
                         current.copy(text = current.text + event.text)
