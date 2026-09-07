@@ -2,11 +2,13 @@ package com.zjf.edgeai.runtime
 
 import android.content.Context
 import android.os.Build
+import android.util.Log
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.ExperimentalApi
+import com.google.ai.edge.litertlm.Message
 import com.zjf.edgeai.runtime.model.ModelDescriptor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -24,11 +26,16 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 @OptIn(ExperimentalApi::class)
 class LiteRtLmRuntime(context: Context) : EdgeAiRuntime {
     companion object {
         private const val ERROR_LIMIT = 600
+        private const val LOG_PREVIEW_LIMIT = 400
+        private const val TAG = "EdgeAiGeneration"
+        private const val ECHO_FAILURE_MESSAGE =
+            "模型连续两次复述了问题，已丢弃异常回复。请换一种问法或清空会话后重试。"
     }
 
     private val appContext = context.applicationContext
@@ -38,6 +45,7 @@ class LiteRtLmRuntime(context: Context) : EdgeAiRuntime {
     private val dispatcher = executor.asCoroutineDispatcher()
     private val runtimeScope = CoroutineScope(SupervisorJob() + dispatcher)
     private val generationActive = AtomicBoolean(false)
+    private val generationIds = AtomicLong(0L)
 
     private val _state = MutableStateFlow<RuntimeState>(RuntimeState.Unloaded)
     override val state: StateFlow<RuntimeState> = _state
@@ -49,6 +57,7 @@ class LiteRtLmRuntime(context: Context) : EdgeAiRuntime {
     private var conversation: Conversation? = null
     private var activeModel: ModelDescriptor? = null
     private var readyState: RuntimeState.Ready? = null
+    private val acceptedHistory = mutableListOf<Message>()
     private var closed = false
 
     override suspend fun initialize(model: ModelDescriptor, preferred: RuntimeBackend) {
@@ -56,6 +65,7 @@ class LiteRtLmRuntime(context: Context) : EdgeAiRuntime {
             check(!closed) { "运行时已关闭" }
             check(!generationActive.get()) { "生成期间不能重新初始化模型" }
             closeNative()
+            acceptedHistory.clear()
             activeModel = model
             readyState = null
             _state.value = RuntimeState.Initializing(preferred)
@@ -108,33 +118,102 @@ class LiteRtLmRuntime(context: Context) : EdgeAiRuntime {
             return@flow
         }
 
-        val currentConversation = conversation
         val currentReady = readyState
-        if (currentConversation == null || currentReady == null) {
+        if (conversation == null || currentReady == null) {
             generationActive.set(false)
             emit(GenerationEvent.Failed("请先加载模型"))
             return@flow
         }
 
         _state.value = RuntimeState.Generating(currentReady.effectiveBackend)
+        val requestId = "generation-${generationIds.incrementAndGet()}"
+        var rejectedAnyAttempt = false
+        debugLog(
+            requestId,
+            "start model=${activeModel?.sha256.orEmpty()} backend=${currentReady.effectiveBackend} " +
+                "topK=${ChatLanguagePolicy.TOP_K} topP=${ChatLanguagePolicy.TOP_P} " +
+                "temperature=${ChatLanguagePolicy.TEMPERATURE} seed=${ChatLanguagePolicy.SEED} " +
+                "repetitionPenalty=${ChatLanguagePolicy.REPETITION_PENALTY} " +
+                "noRepeatNgram=${ChatLanguagePolicy.NO_REPEAT_NGRAM_SIZE} " +
+                "thinkingEnabled=${ChatLanguagePolicy.THINKING_ENABLED} " +
+                "prompt=${logPreview(prompt)}"
+        )
         try {
-            val generatedText = StringBuilder()
-            currentConversation.sendMessageAsync(ChatLanguagePolicy.userTurnPayload(prompt)).collect { message ->
-                val text = message.toString()
-                if (text.isNotEmpty()) {
-                    generatedText.append(text)
-                    emit(GenerationEvent.Delta(text))
+            for (attempt in 1..ChatResponseQualityPolicy.MAX_GENERATION_ATTEMPTS) {
+                val currentConversation = requireNotNull(conversation) { "Conversation 重建失败" }
+                val startedAtNanos = System.nanoTime()
+                var firstTokenAtNanos: Long? = null
+                val generatedText = StringBuilder()
+                debugLog(requestId, "attempt=$attempt begin acceptedHistory=${acceptedHistory.size}")
+
+                currentConversation.sendMessageAsync(
+                    text = ChatLanguagePolicy.userTurnPayload(prompt),
+                    repetitionPenaltyConfig = ChatLanguagePolicy.repetitionPenaltyConfig(),
+                    noRepeatNgramConfig = ChatLanguagePolicy.noRepeatNgramConfig()
+                ).collect { message ->
+                    val text = message.toString()
+                    debugLog(
+                        requestId,
+                        "attempt=$attempt message role=${message.role} " +
+                            "channels=${message.channels.keys.sorted()} content=${logPreview(text)}"
+                    )
+                    if (text.isNotEmpty()) {
+                        if (firstTokenAtNanos == null) {
+                            firstTokenAtNanos = System.nanoTime()
+                            debugLog(
+                                requestId,
+                                "attempt=$attempt firstTokenMs=${nanosToMillis(firstTokenAtNanos!! - startedAtNanos)}"
+                            )
+                        }
+                        generatedText.append(text)
+                        emit(GenerationEvent.Delta(text))
+                    }
                 }
+
+                updateBenchmark(currentConversation)
+                val response = generatedText.toString()
+                val quality = ChatResponseQualityPolicy.assess(prompt, response)
+                rejectedAnyAttempt = rejectedAnyAttempt || quality.rejectedAsEcho
+                _diagnostics.value = _diagnostics.value.copy(
+                    lastRequestId = requestId,
+                    lastGenerationAttempts = attempt,
+                    lastResponseRejectedAsEcho = rejectedAnyAttempt,
+                    thinkingEnabled = ChatLanguagePolicy.THINKING_ENABLED
+                )
+                debugLog(
+                    requestId,
+                    "attempt=$attempt quality similarity=${"%.3f".format(quality.similarity)} " +
+                        "rejected=${quality.rejectedAsEcho} response=${logPreview(response)}"
+                )
+
+                if (!quality.rejectedAsEcho) {
+                    acceptTurn(prompt, response)
+                    ChatLanguagePolicy.literalPreservationSuffix(prompt, response)
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { suffix -> emit(GenerationEvent.Delta(suffix)) }
+                    debugBenchmark(requestId, attempt, currentConversation)
+                    emit(GenerationEvent.Completed(_diagnostics.value))
+                    debugLog(requestId, "complete attempts=$attempt rejectedAny=$rejectedAnyAttempt")
+                    return@flow
+                }
+
+                emit(GenerationEvent.Reset)
+                rebuildConversationFromAcceptedHistory()
+                debugLog(requestId, "attempt=$attempt rejected conversationRebuilt=true")
             }
-            ChatLanguagePolicy.literalPreservationSuffix(prompt, generatedText.toString())
-                .takeIf { it.isNotEmpty() }
-                ?.let { suffix -> emit(GenerationEvent.Delta(suffix)) }
-            updateBenchmark(currentConversation)
-            emit(GenerationEvent.Completed(_diagnostics.value))
+
+            emit(GenerationEvent.Failed(ECHO_FAILURE_MESSAGE))
+            debugLog(requestId, "failed reason=echo attempts=${ChatResponseQualityPolicy.MAX_GENERATION_ATTEMPTS}")
         } catch (cancelled: CancellationException) {
-            runCatching { currentConversation.cancelProcess() }
+            runCatching { conversation?.cancelProcess() }
+            debugLog(requestId, "cancelled")
             throw cancelled
         } catch (failure: Throwable) {
+            if (rejectedAnyAttempt) {
+                emit(GenerationEvent.Reset)
+                runCatching { rebuildConversationFromAcceptedHistory() }
+            }
+            debugLog(requestId, "failed reason=${sanitizeError(failure, activeModel?.absolutePath)}")
             emit(GenerationEvent.Failed(sanitizeError(failure, activeModel?.absolutePath)))
         } finally {
             generationActive.set(false)
@@ -160,6 +239,7 @@ class LiteRtLmRuntime(context: Context) : EdgeAiRuntime {
             check(!generationActive.get()) { "请先停止当前生成" }
             val currentEngine = engine ?: throw IllegalStateException("请先加载模型")
             conversation?.close()
+            acceptedHistory.clear()
             conversation = currentEngine.createConversation(defaultConversationConfig())
             _state.value = readyState ?: RuntimeState.Unloaded
             _diagnostics.value = _diagnostics.value.copy(
@@ -168,7 +248,11 @@ class LiteRtLmRuntime(context: Context) : EdgeAiRuntime {
                 decodeTokenCount = null,
                 prefillTokensPerSecond = null,
                 decodeTokensPerSecond = null,
-                totalConversationTokens = null
+                totalConversationTokens = null,
+                lastRequestId = null,
+                lastGenerationAttempts = null,
+                lastResponseRejectedAsEcho = null,
+                thinkingEnabled = ChatLanguagePolicy.THINKING_ENABLED
             )
         }
     }
@@ -178,6 +262,7 @@ class LiteRtLmRuntime(context: Context) : EdgeAiRuntime {
             if (generationActive.get()) runCatching { conversation?.cancelProcess() }
             closeNative()
             generationActive.set(false)
+            acceptedHistory.clear()
             activeModel = null
             readyState = null
             _state.value = RuntimeState.Unloaded
@@ -256,7 +341,45 @@ class LiteRtLmRuntime(context: Context) : EdgeAiRuntime {
         engine = null
     }
 
-    private fun defaultConversationConfig() = ChatLanguagePolicy.createConversationConfig()
+    private fun acceptTurn(prompt: String, response: String) {
+        acceptedHistory += Message.user(prompt)
+        acceptedHistory += Message.model(response)
+    }
+
+    private fun rebuildConversationFromAcceptedHistory() {
+        val currentEngine = engine ?: throw IllegalStateException("模型运行时不可用")
+        conversation?.close()
+        conversation = currentEngine.createConversation(defaultConversationConfig(acceptedHistory.toList()))
+    }
+
+    private fun defaultConversationConfig(history: List<Message> = emptyList()) =
+        ChatLanguagePolicy.createConversationConfig(history)
+
+    private fun debugBenchmark(requestId: String, attempt: Int, currentConversation: Conversation) {
+        if (!BuildConfig.DEBUG) return
+        val diagnostics = _diagnostics.value
+        Log.d(
+            TAG,
+            "requestId=$requestId attempt=$attempt benchmark " +
+                "ttft=${diagnostics.timeToFirstTokenSeconds} " +
+                "prefillTokens=${diagnostics.prefillTokenCount} " +
+                "decodeTokens=${diagnostics.decodeTokenCount} " +
+                "prefillRate=${diagnostics.prefillTokensPerSecond} " +
+                "decodeRate=${diagnostics.decodeTokensPerSecond} " +
+                "conversationTokens=${runCatching { currentConversation.getTokenCount() }.getOrNull()}"
+        )
+    }
+
+    private fun debugLog(requestId: String, message: String) {
+        if (BuildConfig.DEBUG) Log.d(TAG, "requestId=$requestId $message")
+    }
+
+    private fun logPreview(value: String): String = value
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .take(LOG_PREVIEW_LIMIT)
+
+    private fun nanosToMillis(value: Long): Long = value / 1_000_000L
 
     private fun RuntimeBackend.toSdkBackend(): Backend = when (this) {
         RuntimeBackend.GPU -> Backend.GPU()
@@ -267,7 +390,8 @@ class LiteRtLmRuntime(context: Context) : EdgeAiRuntime {
         deviceManufacturer = Build.MANUFACTURER,
         deviceModel = Build.MODEL,
         androidApi = Build.VERSION.SDK_INT,
-        supportedAbis = Build.SUPPORTED_ABIS.toList()
+        supportedAbis = Build.SUPPORTED_ABIS.toList(),
+        thinkingEnabled = ChatLanguagePolicy.THINKING_ENABLED
     )
 
     private fun currentDeviceSignature() = AndroidDeviceSignature(

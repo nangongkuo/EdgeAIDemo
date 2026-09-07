@@ -206,13 +206,17 @@ class EdgeAiViewModel(
                     is GenerationEvent.Delta -> updateAssistant(assistantId) { current ->
                         current.copy(text = current.text + event.text)
                     }
+                    GenerationEvent.Reset -> updateAssistant(assistantId) { current ->
+                        current.copy(text = "", streaming = true)
+                    }
                     is GenerationEvent.Completed -> updateAssistant(assistantId) { current ->
                         current.copy(streaming = false)
                     }
                     is GenerationEvent.Failed -> {
                         updateAssistant(assistantId) { current ->
                             current.copy(
-                                text = current.text.ifBlank { "生成失败：${event.message}" },
+                                text = current.text.takeIf { it.isNotBlank() }
+                                    ?: "生成失败：${event.message}",
                                 streaming = false
                             )
                         }

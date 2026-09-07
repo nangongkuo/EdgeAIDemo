@@ -2,7 +2,11 @@ package com.zjf.edgeai.runtime
 
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.ConversationConfig
+import com.google.ai.edge.litertlm.Message
+import com.google.ai.edge.litertlm.NoRepeatNgramConfig
+import com.google.ai.edge.litertlm.RepetitionPenaltyConfig
 import com.google.ai.edge.litertlm.SamplerConfig
+import com.google.ai.edge.litertlm.ThinkingConfig
 
 /**
  * Conversation-wide language behavior for the bundled offline chat model.
@@ -16,6 +20,10 @@ internal object ChatLanguagePolicy {
     const val TOP_P = 0.95
     const val TEMPERATURE = 0.2
     const val SEED = 0
+    const val REPETITION_PENALTY = 1.1f
+    const val REPETITION_WINDOW_SIZE = 64
+    const val NO_REPEAT_NGRAM_SIZE = 3
+    const val THINKING_ENABLED = false
 
     private val urlPattern = Regex("""\bhttps?://[^\s`'\"<>，。！？、）】]+""")
     private val inlineCodePattern = Regex("`([^`\n]+)`")
@@ -33,18 +41,42 @@ internal object ChatLanguagePolicy {
         3. 对代码、命令、URL、文件名、产品名、缩写、引号内内容以及用户要求保留的英文术语，必须原样保留字符；不要翻译、改写或纠正这些文字。
         4. 对中英混合的问题，用简体中文解释，并保留必要的英文技术术语。
         5. 用户明确要求翻译到其他语言或指定回答语言时，遵守该明确要求。
+        6. 先直接回答用户的问题，不要复述、改写或反问用户的问题，也不要用问题代替答案。
+        7. 你的真实能力仅限于在本应用内进行完全离线的文字问答。你不能操作手机、不能访问网络、不能读取其他应用或设备数据；当用户询问你的能力时，直接说明这些能力和限制。
     """
 
-    fun createConversationConfig() = ConversationConfig(
+    val DIRECT_ANSWER_EXAMPLES = listOf(
+        "你能在这台手机上做什么？" to
+            ("我可以完全离线地进行文字问答，例如解释概念、整理文字和提供一般建议。" +
+                "我不能控制手机、访问网络或读取其他应用的数据。")
+    )
+
+    fun createConversationConfig(acceptedHistory: List<Message> = emptyList()) = ConversationConfig(
         systemInstruction = Contents.of(SYSTEM_INSTRUCTION.trimIndent()),
+        initialMessages = directAnswerMessages() + acceptedHistory,
         samplerConfig = SamplerConfig(
             topK = TOP_K,
             topP = TOP_P,
             temperature = TEMPERATURE,
             seed = SEED
         ),
-        maxOutputToken = MAX_OUTPUT_TOKENS
+        maxOutputToken = MAX_OUTPUT_TOKENS,
+        thinkingConfig = ThinkingConfig(enableThinking = THINKING_ENABLED)
     )
+
+    fun repetitionPenaltyConfig() = RepetitionPenaltyConfig(
+        repetitionPenalty = REPETITION_PENALTY,
+        windowSize = REPETITION_WINDOW_SIZE
+    )
+
+    fun noRepeatNgramConfig() = NoRepeatNgramConfig(
+        noRepeatNgramSize = NO_REPEAT_NGRAM_SIZE,
+        windowSize = REPETITION_WINDOW_SIZE
+    )
+
+    private fun directAnswerMessages(): List<Message> = DIRECT_ANSWER_EXAMPLES.flatMap { (user, model) ->
+        listOf(Message.user(user), Message.model(model))
+    }
 
     /**
      * LiteRT-LM owns user/assistant role formatting. The visible user prompt must stay the

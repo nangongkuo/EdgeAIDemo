@@ -65,8 +65,16 @@ class DiagnosticsFragment : Fragment() {
         appendLine("  Prefill: ${prefillTokensPerSecond.rate()}")
         appendLine("  Decode: ${decodeTokensPerSecond.rate()}")
         appendLine("  会话 Token: ${totalConversationTokens ?: "N/A"}")
+        appendLine()
+        appendLine("最近生成")
+        appendLine("  请求 ID: ${lastRequestId ?: "N/A"}")
+        appendLine("  尝试次数: ${lastGenerationAttempts ?: "N/A"}")
+        appendLine("  拒绝过回声: ${lastResponseRejectedAsEcho.yesNo()}")
+        appendLine("  显式思考: ${thinkingEnabled.enabledState()}")
     }
 
     private fun Double?.seconds() = this?.let { "%.3f s".format(it) } ?: "N/A"
     private fun Double?.rate() = this?.let { "%.2f tokens/s".format(it) } ?: "N/A"
+    private fun Boolean?.yesNo() = this?.let { if (it) "是" else "否" } ?: "N/A"
+    private fun Boolean?.enabledState() = this?.let { if (it) "开启" else "关闭" } ?: "N/A"
 }

@@ -25,6 +25,32 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class MultilingualConversationDeviceTest {
     @Test
+    fun bundledModelAnswersReportedMultiTurnScenarioWithoutSemanticEcho() = runBlocking<Unit> {
+        assumeTrue("需要 arm64-v8a 设备", Build.SUPPORTED_ABIS.contains("arm64-v8a"))
+
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val runtime = LiteRtLmRuntime(context)
+        val backend = if (isEmulator()) RuntimeBackend.CPU else RuntimeBackend.GPU
+
+        try {
+            runtime.initialize(loadBundledModel(context), backend)
+
+            assertCompletedResponse(runtime, "hi")
+            val firstCapabilityAnswer = assertCompletedResponse(runtime, "你能在这台手机上做什么")
+            assertDirectCapabilityAnswer(firstCapabilityAnswer)
+
+            val secondCapabilityAnswer = assertCompletedResponse(
+                runtime,
+                "我想先看看你的能力再决定做什么，你告诉我你能做什么"
+            )
+            assertDirectCapabilityAnswer(secondCapabilityAnswer)
+        } finally {
+            runtime.close()
+        }
+        Unit
+    }
+
+    @Test
     fun bundledModelAnswersChineseQuestionsWithoutRepeatingTheUserTurn() = runBlocking<Unit> {
         assumeTrue("需要 arm64-v8a 真机", Build.SUPPORTED_ABIS.contains("arm64-v8a"))
         assumeFalse("模拟器不作为端侧推理验收设备", isEmulator())
@@ -116,6 +142,7 @@ class MultilingualConversationDeviceTest {
             runtime.generate(prompt).collect { event ->
                 when (event) {
                     is GenerationEvent.Delta -> response.append(event.text)
+                    GenerationEvent.Reset -> response.clear()
                     is GenerationEvent.Completed -> completed = true
                     is GenerationEvent.Failed -> throw AssertionError("生成失败：${event.message}")
                 }
@@ -126,6 +153,18 @@ class MultilingualConversationDeviceTest {
             assertTrue("回复不能为空", text.isNotBlank())
             text
         }
+
+    private fun assertDirectCapabilityAnswer(response: String) {
+        assertTrue(
+            "能力回答必须直接说明能力或限制；实际回复：$response",
+            listOf("我能", "可以", "能够", "离线", "文字", "问答", "不能").any(response::contains)
+        )
+        assertFalse(
+            "能力回答不得延续截图中的礼貌反问；实际回复：$response",
+            response.contains("想在这台手机上做什么") ||
+                response.contains("先看看你的能力再决定做什么")
+        )
+    }
 
     private fun String.hasCjk(): Boolean = any { it in '\u4E00'..'\u9FFF' }
 

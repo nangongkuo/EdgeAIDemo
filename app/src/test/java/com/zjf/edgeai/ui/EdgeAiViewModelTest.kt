@@ -112,6 +112,46 @@ class EdgeAiViewModelTest {
     }
 
     @Test
+    fun echoResetClearsFirstAttemptBeforeRenderingRetry() = runTest {
+        val runtime = FakeRuntime().apply {
+            generation = flowOf(
+                GenerationEvent.Delta("您好，您想在这台手机上做什么呢？"),
+                GenerationEvent.Reset,
+                GenerationEvent.Delta("我可以完全离线地进行文字问答，不能控制手机或访问网络。"),
+                GenerationEvent.Completed(diagnostics.value)
+            )
+        }
+        val viewModel = EdgeAiViewModel(FakeModelStore(selected = testModel), runtime)
+
+        viewModel.sendPrompt("你能在这台手机上做什么")
+        advanceUntilIdle()
+
+        val answer = viewModel.uiState.value.messages.last()
+        assertEquals("我可以完全离线地进行文字问答，不能控制手机或访问网络。", answer.text)
+        assertFalse(answer.streaming)
+    }
+
+    @Test
+    fun echoResetFollowedByFailureDoesNotLeaveRejectedText() = runTest {
+        val runtime = FakeRuntime().apply {
+            generation = flowOf(
+                GenerationEvent.Delta("您好，您想在这台手机上做什么呢？"),
+                GenerationEvent.Reset,
+                GenerationEvent.Failed("模型回复质量不符合要求")
+            )
+        }
+        val viewModel = EdgeAiViewModel(FakeModelStore(selected = testModel), runtime)
+
+        viewModel.sendPrompt("你能在这台手机上做什么")
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals("生成失败：模型回复质量不符合要求", state.messages.last().text)
+        assertEquals("模型回复质量不符合要求", state.errorMessage)
+        assertFalse(state.messages.last().streaming)
+    }
+
+    @Test
     fun clearConversationResetsRuntimeAndMessages() = runTest {
         val runtime = FakeRuntime().apply {
             generation = flowOf(GenerationEvent.Delta("answer"))

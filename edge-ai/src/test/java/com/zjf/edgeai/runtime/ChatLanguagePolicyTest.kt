@@ -1,6 +1,7 @@
 package com.zjf.edgeai.runtime
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -12,6 +13,10 @@ class ChatLanguagePolicyTest {
         assertEquals(0.2, ChatLanguagePolicy.TEMPERATURE, 0.0)
         assertEquals(0, ChatLanguagePolicy.SEED)
         assertEquals(512, ChatLanguagePolicy.MAX_OUTPUT_TOKENS)
+        assertEquals(1.1f, ChatLanguagePolicy.REPETITION_PENALTY)
+        assertEquals(64, ChatLanguagePolicy.REPETITION_WINDOW_SIZE)
+        assertEquals(3, ChatLanguagePolicy.NO_REPEAT_NGRAM_SIZE)
+        assertFalse(ChatLanguagePolicy.THINKING_ENABLED)
     }
 
     @Test
@@ -22,6 +27,8 @@ class ChatLanguagePolicyTest {
         assertTrue(instruction.contains("简体中文回答"))
         assertTrue(instruction.contains("代码、命令、URL、文件名、产品名、缩写、引号内内容"))
         assertTrue(instruction.contains("明确指定目标语言"))
+        assertTrue(instruction.contains("不要复述、改写或反问"))
+        assertTrue(instruction.contains("不能操作手机、不能访问网络、不能读取其他应用"))
     }
 
     @Test
@@ -44,4 +51,16 @@ class ChatLanguagePolicyTest {
         )
     }
 
+    @Test
+    fun directAnswerExampleAndGenerationControlsArePinned() {
+        assertEquals(1, ChatLanguagePolicy.DIRECT_ANSWER_EXAMPLES.size)
+        val (user, model) = ChatLanguagePolicy.DIRECT_ANSWER_EXAMPLES.single()
+        assertEquals("你能在这台手机上做什么？", user)
+        assertTrue(model.contains("离线"))
+        assertTrue(model.contains("不能控制手机"))
+        assertFalse(ChatLanguagePolicy.THINKING_ENABLED)
+        assertEquals(1.1f, ChatLanguagePolicy.REPETITION_PENALTY)
+        assertEquals(64, ChatLanguagePolicy.REPETITION_WINDOW_SIZE)
+        assertEquals(3, ChatLanguagePolicy.NO_REPEAT_NGRAM_SIZE)
+    }
 }

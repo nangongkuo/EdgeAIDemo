@@ -22,6 +22,7 @@ sealed interface RuntimeState {
 
 sealed interface GenerationEvent {
     data class Delta(val text: String) : GenerationEvent
+    data object Reset : GenerationEvent
     data class Completed(val diagnostics: RuntimeDiagnostics) : GenerationEvent
     data class Failed(val message: String) : GenerationEvent
 }
@@ -44,7 +45,11 @@ data class RuntimeDiagnostics(
     val decodeTokenCount: Int? = null,
     val prefillTokensPerSecond: Double? = null,
     val decodeTokensPerSecond: Double? = null,
-    val totalConversationTokens: Int? = null
+    val totalConversationTokens: Int? = null,
+    val lastRequestId: String? = null,
+    val lastGenerationAttempts: Int? = null,
+    val lastResponseRejectedAsEcho: Boolean? = null,
+    val thinkingEnabled: Boolean? = null
 )
 
 interface EdgeAiRuntime : Closeable {
