@@ -1,22 +1,20 @@
 schema: spec-driven
 
 context: |
-  EdgeAIDemo is an Android 12+ ARM64 validation application for Google AI Edge LiteRT-LM.
-  The applicationId is com.zjf.edgeai. Production code is Kotlin with XML Views and AndroidX.
-  The project contains an app UI module and an edge-ai Android library that isolates model storage
-  and LiteRT-LM runtime integration. A license-approved .litertlm model is packaged as an uncompressed
-  app asset for local distribution, copied transactionally to app-private storage on first launch, and
-  initialized automatically. Users may still replace it through SAF. Model binaries and access tokens
-  remain local build inputs and must never be committed to the Git repository.
-  LiteRT-LM JNI lifecycle calls must be serialized and Engine/Conversation resources must be closed explicitly.
-  Emulator runs validate UI and error handling only; inference acceptance requires Android 12+ ARM64 hardware.
+  EdgeAIDemo 是面向 Google AI Edge LiteRT-LM 的 Android 12+ ARM64 验证应用。
+  applicationId 为 com.zjf.edgeai。生产代码使用 Kotlin、XML View 和 AndroidX。
+  项目包含 app UI 模块和隔离模型存储及 LiteRT-LM 运行时集成的 edge-ai Android 库。
+  经许可批准的 .litertlm 模型作为未压缩应用资源进行本地分发，会在首次启动时事务式复制到应用私有存储，
+  并自动初始化；用户仍可通过 SAF 替换。模型二进制和访问令牌属于本地构建输入，绝不可提交到 Git 仓库。
+  LiteRT-LM JNI 生命周期调用必须串行化，且必须显式关闭 Engine/Conversation 资源。
+  模拟器运行仅验证 UI 与错误处理；推理验收需要 Android 12+ ARM64 硬件。
 
 rules:
   proposal:
-    - State user-visible validation outcomes and explicit non-goals.
+    - 陈述用户可见的验证结果和明确的非目标。
   specs:
-    - Every requirement must use SHALL or MUST and include success and failure scenarios where applicable.
+    - 每项需求必须使用 SHALL 或 MUST；适用时必须包含成功和失败场景。
   design:
-    - Record module ownership, threading, native resource lifecycle, GPU fallback, and model storage decisions.
+    - 记录模块所有权、线程、原生资源生命周期、GPU 回退和模型存储决策。
   tasks:
-    - Order tasks so OpenSpec validation and automated tests are run before physical-device acceptance.
+    - 编排任务顺序，使 OpenSpec 验证和自动化测试先于真机验收执行。

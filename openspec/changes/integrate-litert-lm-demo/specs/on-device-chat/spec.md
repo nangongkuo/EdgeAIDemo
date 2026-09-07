@@ -1,82 +1,82 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Automatic startup initialization
-The application SHALL automatically initialize the valid selected model after startup provisioning without requiring the user to press Initialize.
+### 需求：自动启动初始化
+应用 SHALL 在启动配置完成后自动初始化有效的已选模型，而无需用户点击“初始化”。
 
-#### Scenario: Automatic GPU startup succeeds
-- **WHEN** a selected or freshly installed model is available and GPU initialization succeeds
-- **THEN** the runtime SHALL become ready automatically and enable chat input
+#### 场景：自动 GPU 启动成功
+- **WHEN** 已选模型或刚安装模型可用，且 GPU 初始化成功
+- **THEN** 运行时 SHALL 自动进入就绪状态，并启用对话输入
 
-#### Scenario: Automatic GPU startup requires CPU fallback
-- **WHEN** automatic GPU initialization fails and CPU initialization succeeds
-- **THEN** the runtime MUST become ready on CPU and display the GPU failure reason
+#### 场景：自动 GPU 启动需要 CPU 回退
+- **WHEN** 自动 GPU 初始化失败而 CPU 初始化成功
+- **THEN** 运行时 MUST 在 CPU 上进入就绪状态，并展示 GPU 失败原因
 
-#### Scenario: Automatic startup initialization fails
-- **WHEN** neither backend can initialize the model
-- **THEN** the application SHALL keep the model-management controls available and display a recoverable error for retry, replacement, or deletion
+#### 场景：自动启动初始化失败
+- **WHEN** 两种后端都无法初始化模型
+- **THEN** 应用 SHALL 保持模型管理控件可用，并展示可恢复错误，以便重试、替换或删除
 
-### Requirement: Backend-aware runtime initialization
-The runtime SHALL initialize a selected model off the main thread using the preferred backend and expose the effective backend in state.
+### 需求：感知后端的运行时初始化
+运行时 SHALL 在主线程外使用首选后端初始化已选模型，并在状态中暴露实际后端。
 
-#### Scenario: Android emulator GPU preflight
-- **WHEN** GPU is preferred on an Android emulator identified by a standard generic, ranchu, or goldfish runtime signature
-- **THEN** the runtime MUST initialize CPU without attempting a GPU Engine, and SHALL report GPU as preferred, CPU as effective, and an emulator/OpenCL compatibility reason
+#### 场景：Android 模拟器 GPU 预检
+- **WHEN** 在由标准 generic、ranchu 或 goldfish 运行时特征识别出的 Android 模拟器上首选 GPU
+- **THEN** 运行时 MUST 在不尝试 GPU Engine 的情况下初始化 CPU，并 SHALL 报告 GPU 为首选、CPU 为实际后端和模拟器/OpenCL 兼容性原因
 
-#### Scenario: Physical-device GPU behavior is preserved
-- **WHEN** GPU is preferred on a non-emulator Android device
-- **THEN** the runtime SHALL continue to attempt GPU initialization before its existing CPU fallback behavior
+#### 场景：保留真机 GPU 行为
+- **WHEN** 在非模拟器 Android 设备上首选 GPU
+- **THEN** 运行时 SHALL 在现有 CPU 回退行为之前继续尝试 GPU 初始化
 
-#### Scenario: GPU initialization succeeds
-- **WHEN** GPU is preferred and LiteRT-LM initializes successfully
-- **THEN** the runtime SHALL become ready with GPU as the effective backend
+#### 场景：GPU 初始化成功
+- **WHEN** 首选 GPU 且 LiteRT-LM 成功初始化
+- **THEN** 运行时 SHALL 以 GPU 作为实际后端进入就绪状态
 
-#### Scenario: GPU initialization fails
-- **WHEN** GPU is preferred and initialization throws an error
-- **THEN** the runtime MUST close partial native resources, retain the GPU error as a fallback reason, and attempt CPU initialization exactly once
+#### 场景：GPU 初始化失败
+- **WHEN** 首选 GPU 且初始化抛出异常
+- **THEN** 运行时 MUST 关闭部分原生资源，保留 GPU 错误作为回退原因，并且只尝试一次 CPU 初始化
 
-#### Scenario: CPU fallback also fails
-- **WHEN** CPU fallback cannot initialize the model
-- **THEN** the runtime SHALL enter a recoverable error state and MUST NOT retain an Engine or Conversation
+#### 场景：CPU 回退同样失败
+- **WHEN** CPU 回退无法初始化模型
+- **THEN** 运行时 SHALL 进入可恢复错误状态，且 MUST NOT 保留 Engine 或 Conversation
 
-### Requirement: Offline streaming conversation
-The runtime SHALL generate multi-turn text locally using LiteRT-LM Flow streaming without requiring network access after model import.
+### 需求：离线流式对话
+运行时 SHALL 在模型导入后通过 LiteRT-LM Flow 进行本地多轮文本生成，无需网络访问。
 
-#### Scenario: Stream a response
-- **WHEN** the runtime is ready and the user submits a non-blank prompt
-- **THEN** the runtime SHALL emit ordered text deltas followed by one completion event while retaining conversation context
+#### 场景：流式生成响应
+- **WHEN** 运行时处于就绪状态且用户提交非空提示词
+- **THEN** 运行时 SHALL 按序发出文本增量，随后发出一个完成事件，并保留对话上下文
 
-#### Scenario: Reject concurrent generation
-- **WHEN** a generation is already active and another prompt is submitted
-- **THEN** the runtime MUST reject the second prompt without starting another native generation
+#### 场景：拒绝并发生成
+- **WHEN** 已有生成任务处于活动状态，且又提交了另一条提示词
+- **THEN** 运行时 MUST 拒绝第二条提示词，而不得启动另一项原生生成
 
-### Requirement: LiteRT-LM completion-callback ABI compatibility
-The application MUST resolve `org.jetbrains.kotlinx:kotlinx-coroutines-core` and `org.jetbrains.kotlinx:kotlinx-coroutines-android` version 1.11.0 for every packaged runtime variant that includes LiteRT-LM 0.15.0.
+### 需求：LiteRT-LM 完成回调 ABI 兼容性
+对于每一种包含 LiteRT-LM 0.15.0 的打包运行时变体，应用 MUST 解析 `org.jetbrains.kotlinx:kotlinx-coroutines-core` 和 `org.jetbrains.kotlinx:kotlinx-coroutines-android` 的 1.11.0 版本。
 
-#### Scenario: Verify the packaged coroutine runtime
-- **WHEN** the debug runtime dependency graph is resolved
-- **THEN** Gradle SHALL select 1.11.0 for both coroutine core and Android artifacts and MUST NOT select a lower version through LiteRT-LM's published metadata or another transitive dependency
+#### 场景：验证打包协程运行时
+- **WHEN** 解析调试运行时依赖图
+- **THEN** Gradle SHALL 为协程 core 和 Android 构件均选择 1.11.0，且 MUST NOT 因 LiteRT-LM 已发布元数据或其他传递依赖选择更低版本
 
-#### Scenario: Complete a streamed response
-- **WHEN** LiteRT-LM finishes an otherwise successful streamed response
-- **THEN** the application MUST remain alive, emit its normal completion event, and MUST NOT terminate with `NoSuchMethodError` for `SendChannel.close$default`
+#### 场景：完成流式响应
+- **WHEN** LiteRT-LM 完成一次原本成功的流式响应
+- **THEN** 应用 MUST 保持存活、发出正常完成事件，并且 MUST NOT 因 `SendChannel.close$default` 的 `NoSuchMethodError` 而终止
 
-### Requirement: Generation cancellation
-The application SHALL allow the user to cancel active generation and return the runtime to a usable ready state.
+### 需求：生成取消
+应用 SHALL 允许用户取消活动生成，并让运行时回到可用的就绪状态。
 
-#### Scenario: Cancel an active response
-- **WHEN** the user selects Stop during generation
-- **THEN** the runtime MUST call LiteRT-LM cancellation, stop collecting output, and become ready for another prompt
+#### 场景：取消活动响应
+- **WHEN** 用户在生成期间选择“停止”
+- **THEN** 运行时 MUST 调用 LiteRT-LM 取消、停止收集输出，并准备好接收下一条提示词
 
-### Requirement: Conversation reset
-The runtime SHALL clear conversation history without reloading the Engine.
+### 需求：重置对话
+运行时 SHALL 在不重新加载 Engine 的情况下清除对话历史。
 
-#### Scenario: Clear chat history
-- **WHEN** the user confirms Clear conversation while the runtime is ready
-- **THEN** the runtime MUST close the old Conversation, create a new Conversation with default sampling configuration, and retain the loaded Engine
+#### 场景：清空对话历史
+- **WHEN** 运行时就绪时用户确认“清空对话”
+- **THEN** 运行时 MUST 关闭旧 Conversation，使用默认采样配置新建 Conversation，并保留已加载的 Engine
 
-### Requirement: Deterministic resource release
-The runtime MUST close Conversation before Engine during model change, explicit unload, or final owner cleanup.
+### 需求：确定性资源释放
+运行时 MUST 在模型变更、显式卸载或最终所有者清理时先关闭 Conversation，再关闭 Engine。
 
-#### Scenario: Unload a model
-- **WHEN** the user unloads the active model
-- **THEN** the runtime SHALL cancel active work, release all native resources, and return to the unloaded state
+#### 场景：卸载模型
+- **WHEN** 用户卸载活动模型
+- **THEN** 运行时 SHALL 取消活动任务、释放全部原生资源，并回到未加载状态

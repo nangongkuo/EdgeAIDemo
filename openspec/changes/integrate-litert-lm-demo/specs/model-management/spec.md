@@ -1,60 +1,60 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Bundled model provisioning
-The application SHALL package the approved Gemma `.litertlm` as an uncompressed asset and MUST transactionally install it into app-private storage when no valid selected model exists.
+### 需求：内置模型配置
+应用 SHALL 将已批准的 Gemma `.litertlm` 作为未压缩资源打包；在不存在有效已选模型时，MUST 以事务方式将其安装到应用私有存储。
 
-#### Scenario: Bundled asset integrity
-- **WHEN** the application extracts the bundled Gemma model
-- **THEN** it MUST verify the expected byte length and SHA-256 before selecting the model, and MUST delete a mismatched extraction with a recoverable error
+#### 场景：内置资源完整性
+- **WHEN** 应用提取内置 Gemma 模型
+- **THEN** MUST 在选择该模型前校验预期字节长度和 SHA-256；若提取结果不匹配，MUST 删除它并给出可恢复错误
 
-#### Scenario: Fresh application launch
-- **WHEN** the application starts without a valid selected model and the bundled asset is readable
-- **THEN** the application SHALL copy it with progress and SHA-256 verification, persist the resulting descriptor, and expose it for automatic initialization
+#### 场景：首次应用启动
+- **WHEN** 应用启动时不存在有效已选模型，且内置资源可读取
+- **THEN** 应用 SHALL 在复制过程中展示进度并校验 SHA-256，持久化得到的描述符，并让其可被自动初始化
 
-#### Scenario: Existing selected model
-- **WHEN** the application starts with a valid selected private model
-- **THEN** the application MUST reuse that model without copying or replacing it from the bundled asset
+#### 场景：已存在选中模型
+- **WHEN** 应用启动时存在有效的已选私有模型
+- **THEN** 应用 MUST 复用该模型，而不从内置资源复制或替换它
 
-#### Scenario: Bundled asset missing or installation fails
-- **WHEN** the asset is absent, unreadable, cancelled, or cannot be written due to storage exhaustion
-- **THEN** the application MUST remove any `.partial` file and show a recoverable error while retaining manual SAF import
+#### 场景：内置资源缺失或安装失败
+- **WHEN** 资源不存在、不可读取、被取消，或因存储耗尽而无法写入
+- **THEN** 应用 MUST 移除所有 `.partial` 文件，展示可恢复错误，并保留手动 SAF 导入能力
 
-### Requirement: Local model import
-The application SHALL allow a user to select a `.litertlm` document and import it into app-private storage without requesting broad storage permission.
+### 需求：本地模型导入
+应用 SHALL 允许用户选择 `.litertlm` 文档并导入至应用私有存储，无需申请广泛存储权限。
 
-#### Scenario: Import a valid model document
-- **WHEN** the user selects a readable, non-empty `.litertlm` document with sufficient destination space
-- **THEN** the application SHALL copy it into app-private storage and report determinate progress when the source length is known
+#### 场景：导入有效模型文档
+- **WHEN** 用户选择了可读取、非空且目标空间充足的 `.litertlm` 文档
+- **THEN** 应用 SHALL 将其复制至应用私有存储；已知源长度时 SHALL 报告确定性进度
 
-#### Scenario: Reject an invalid document
-- **WHEN** the selected document is empty, unreadable, or does not have the `.litertlm` extension
-- **THEN** the application MUST reject the import and display a recoverable error without changing the selected model
+#### 场景：拒绝无效文档
+- **WHEN** 所选文档为空、不可读取，或不具有 `.litertlm` 扩展名
+- **THEN** 应用 MUST 拒绝导入，显示可恢复错误，且不得改变已选模型
 
-### Requirement: Transactional model persistence
-The application MUST calculate SHA-256 while copying, write through a temporary `.partial` file, and persist model metadata only after the complete file is atomically installed.
+### 需求：事务式模型持久化
+应用 MUST 在复制过程中计算 SHA-256、经由临时 `.partial` 文件写入，并且只在完整文件以原子方式安装完成后才持久化模型元数据。
 
-#### Scenario: Successful transactional import
-- **WHEN** all source bytes are copied successfully
-- **THEN** the application SHALL rename the file to `<sha256>.litertlm`, persist its metadata, and restore it after application restart
+#### 场景：成功的事务式导入
+- **WHEN** 全部源字节已成功复制
+- **THEN** 应用 SHALL 将文件重命名为 `<sha256>.litertlm`，持久化其元数据，并在应用重启后恢复它
 
-#### Scenario: Interrupted transactional import
-- **WHEN** import is cancelled, fails, or the application later discovers an orphaned `.partial` file
-- **THEN** the application MUST delete the incomplete file and retain the previously selected model
+#### 场景：被中断的事务式导入
+- **WHEN** 导入被取消、失败，或应用后来发现孤立的 `.partial` 文件
+- **THEN** 应用 MUST 删除不完整文件并保留此前已选模型
 
-### Requirement: Storage safety
-The application MUST validate known source length against usable destination space with a safety margin before copying and MUST surface write failures for sources with unknown length.
+### 需求：存储安全
+应用 MUST 在复制前将已知源长度与可用目标空间（加安全余量）进行校验，并 MUST 向未知长度来源报告写入失败。
 
-#### Scenario: Insufficient storage
-- **WHEN** known available storage is less than the source length plus the configured safety margin
-- **THEN** the application SHALL refuse the copy and report insufficient storage
+#### 场景：存储空间不足
+- **WHEN** 已知可用存储小于源长度加配置的安全余量
+- **THEN** 应用 SHALL 拒绝复制并报告存储空间不足
 
-### Requirement: Model replacement and deletion
-The application SHALL support replacing or deleting the selected model only after active generation and native runtime resources have been stopped.
+### 需求：模型替换与删除
+应用 SHALL 仅在活动生成和原生运行时资源均已停止后，支持替换或删除已选模型。
 
-#### Scenario: Replace an existing model
-- **WHEN** a new model finishes importing successfully
-- **THEN** the application SHALL select the new model and delete the previous private model file if it is no longer referenced
+#### 场景：替换现有模型
+- **WHEN** 新模型完成导入
+- **THEN** 应用 SHALL 选中新模型；若旧私有模型文件不再被引用，则删除该旧文件
 
-#### Scenario: Delete the selected model
-- **WHEN** the user confirms model deletion
-- **THEN** the application MUST unload the runtime, remove the private file and metadata, and return to the no-model state
+#### 场景：删除已选模型
+- **WHEN** 用户确认删除模型
+- **THEN** 应用 MUST 卸载运行时，移除私有文件和元数据，并返回无模型状态
