@@ -49,6 +49,8 @@ data class ModelRequest(
     val tools: List<ToolDescriptor> = emptyList(),
     val maxOutputTokens: Int? = null,
     val privacyLevel: PrivacyLevel = PrivacyLevel.PRIVATE,
+    /** 仅供语义质量和字面保留策略使用，绝不包含 system、历史或工具 Schema。 */
+    val originalUserInput: String? = null,
 )
 
 @Serializable

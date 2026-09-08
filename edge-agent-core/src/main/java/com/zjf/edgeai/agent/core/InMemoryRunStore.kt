@@ -139,6 +139,7 @@ class InMemoryRunStore(
                     com.zjf.edgeai.agent.api.ApprovalDecision.DENY -> ApprovalState.DENIED
                     else -> ApprovalState.APPROVED
                 },
+                requiredAndroidPermissions = request.requiredAndroidPermissions,
             )
             val remaining = snapshot.pendingApprovals.filterNot { it.approvalId == request.id }
             snapshot.copy(

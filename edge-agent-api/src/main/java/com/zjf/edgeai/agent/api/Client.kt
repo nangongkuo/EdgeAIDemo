@@ -60,6 +60,7 @@ data class AgentSdkConfig(
     val toolRuntime: ToolRuntime? = null,
     val secretStore: SecretStore? = null,
     val remoteWorkerProviders: List<RemoteWorkerProvider> = emptyList(),
+    val actionResolvers: List<ActionResolver> = emptyList(),
 ) {
     init {
         require(localInferenceConcurrency == 1) { "Agent SDK 1.0 的端侧推理并发固定为 1" }

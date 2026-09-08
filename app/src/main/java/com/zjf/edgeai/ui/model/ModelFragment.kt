@@ -92,7 +92,11 @@ class ModelFragment : Fragment() {
                     binding.cpuRadio.isEnabled = !busy
 
                     ui.errorMessage?.let { message ->
-                        Snackbar.make(binding.root, message, Snackbar.LENGTH_LONG).show()
+                        Snackbar.make(
+                            requireActivity().findViewById(android.R.id.content),
+                            message,
+                            Snackbar.LENGTH_LONG,
+                        ).show()
                         viewModel.clearError()
                     }
                 }

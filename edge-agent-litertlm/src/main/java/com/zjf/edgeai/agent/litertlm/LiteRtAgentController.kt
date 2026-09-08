@@ -9,6 +9,10 @@ import com.zjf.edgeai.agent.api.EdgeAgentClient
 import com.zjf.edgeai.agent.api.EdgeAgentSdk
 import com.zjf.edgeai.agent.api.ModelCapabilities
 import com.zjf.edgeai.agent.api.ModelId
+import com.zjf.edgeai.agent.capabilities.ToolRegistry
+import com.zjf.edgeai.agent.capabilities.calendar.AndroidCalendarCapability
+import com.zjf.edgeai.agent.capabilities.calendar.AndroidCalendarToolProvider
+import com.zjf.edgeai.agent.capabilities.calendar.CalendarActionResolver
 import com.zjf.edgeai.runtime.RuntimeBackend
 import com.zjf.edgeai.runtime.RuntimeDiagnostics
 import com.zjf.edgeai.runtime.RuntimeState
@@ -84,8 +88,9 @@ class LiteRtAgentController(context: Context) : AgentModelController {
                 id = AgentId("root-supervisor"),
                 name = "root_supervisor",
                 description = "端侧请求路由、执行与最终汇总 Agent",
-                instructions = "使用简体中文直接回答；复杂任务先验证 Worker 证据，再给出唯一最终结论。",
+                instructions = "使用简体中文直接回答；只能调用已注册、已授权的能力；未获得成功 ToolResult 前不得声称外部操作已完成；复杂任务先验证 Worker 证据，再给出唯一最终结论。",
                 preferredModelId = general.modelId,
+                capabilityAllowlist = setOf(AndroidCalendarCapability.CREATE_EVENT),
                 childAgents = listOf(AgentId("analysis-worker"), AgentId("verification-worker")),
             )
             val workers = listOf(
@@ -104,7 +109,10 @@ class LiteRtAgentController(context: Context) : AgentModelController {
                     preferredModelId = general.modelId,
                 ),
             )
-            val adkEngine = AdkAgentEngine(listOf(provider))
+            val toolRegistry = ToolRegistry(
+                providers = listOf(AndroidCalendarToolProvider(appContext)),
+            )
+            val adkEngine = AdkAgentEngine(listOf(provider), toolRuntime = toolRegistry)
             _client.value = EdgeAgentSdk.create(
                 appContext,
                 AgentSdkConfig(
@@ -112,6 +120,8 @@ class LiteRtAgentController(context: Context) : AgentModelController {
                     workerAgents = workers,
                     modelProviders = listOf(provider),
                     agentEngine = adkEngine,
+                    toolRuntime = toolRegistry,
+                    actionResolvers = listOf(CalendarActionResolver()),
                 ),
             )
         } catch (failure: Throwable) {

@@ -43,6 +43,54 @@
       android:text="@string/chat_empty_hint" />
   </FrameLayout>
 
+  <LinearLayout
+    android:id="@+id/chatApprovalPanel"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="8dp"
+    android:background="@drawable/bg_status"
+    android:orientation="vertical"
+    android:padding="10dp"
+    android:visibility="gone">
+
+    <TextView
+      android:id="@+id/chatApprovalText"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:textIsSelectable="true" />
+
+    <LinearLayout
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:orientation="horizontal">
+
+      <com.google.android.material.button.MaterialButton
+        android:id="@+id/chatApprove"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:text="@string/calendar_approve_create" />
+
+      <com.google.android.material.button.MaterialButton
+        android:id="@+id/chatDeny"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_weight="1"
+        android:text="@string/agent_deny" />
+    </LinearLayout>
+  </LinearLayout>
+
+  <TextView
+    android:id="@+id/chatInputRequest"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="6dp"
+    android:background="@drawable/bg_status"
+    android:padding="10dp"
+    android:visibility="gone" />
+
   <com.google.android.material.textfield.TextInputLayout
     android:layout_width="match_parent"
     android:layout_height="wrap_content"

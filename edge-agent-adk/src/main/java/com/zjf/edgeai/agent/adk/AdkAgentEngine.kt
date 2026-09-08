@@ -34,12 +34,20 @@ class AdkAgentEngine(
     private val toolRuntime: ToolRuntime? = null,
     private val broker: ModelExecutionBroker = ModelExecutionBroker(),
 ) : AgentEngine {
+    private val supportsToolCalling = providers.any { provider ->
+        provider.models.values.any { it.toolCalling }
+    }
     private val modelRouter = ModelRouter(providers)
     private val durableDelegate = ProviderAgentEngine(providers, broker, toolRuntime)
     private val activeRunners = ConcurrentHashMap<com.zjf.edgeai.agent.api.RunId, Runner>()
 
     override fun execute(request: AgentEngineRequest): Flow<AgentEngineEvent> = flow {
-        if (request is AgentEngineRequest.Supervisor || request is AgentEngineRequest.Workflow || hasTools(request)) {
+        if (
+            request is AgentEngineRequest.Supervisor ||
+            request is AgentEngineRequest.Workflow ||
+            request is AgentEngineRequest.ToolAction ||
+            hasTools(request)
+        ) {
             durableDelegate.execute(request).collect { emit(it) }
             return@flow
         }
@@ -113,7 +121,7 @@ class AdkAgentEngine(
     }
 
     private suspend fun hasTools(request: AgentEngineRequest): Boolean {
-        if (toolRuntime == null || request !is AgentEngineRequest.Single) return false
+        if (!supportsToolCalling || toolRuntime == null || request !is AgentEngineRequest.Single) return false
         return toolRuntime.descriptors(request.agent.capabilityAllowlist).isNotEmpty()
     }
 

@@ -1,6 +1,8 @@
 package com.zjf.edgeai.agent.core
 
 import com.zjf.edgeai.agent.api.AgentDefinition
+import com.zjf.edgeai.agent.api.ActionResolution
+import com.zjf.edgeai.agent.api.ActionResolver
 import com.zjf.edgeai.agent.api.AgentEngine
 import com.zjf.edgeai.agent.api.AgentEngineEvent
 import com.zjf.edgeai.agent.api.AgentEngineRequest
@@ -10,6 +12,7 @@ import com.zjf.edgeai.agent.api.AgentRequest
 import com.zjf.edgeai.agent.api.ArtifactId
 import com.zjf.edgeai.agent.api.ArtifactRef
 import com.zjf.edgeai.agent.api.CapabilityId
+import com.zjf.edgeai.agent.api.PreparedToolInvocation
 import com.zjf.edgeai.agent.api.RunId
 import com.zjf.edgeai.agent.api.RunState
 import com.zjf.edgeai.agent.api.SessionId
@@ -35,6 +38,48 @@ import org.junit.Test
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class RunSchedulerRecoveryTest {
+    @Test
+    fun deterministicActionWaitsForInputThenRunsPreparedToolAction() = runTest {
+        val store = InMemoryRunStore { 10L }
+        store.create(RUN_ID, AgentRequest("帮我定个日程"), 1)
+        store.append(RUN_ID) { sequence, timestamp ->
+            AgentEvent.RunStateChanged(RUN_ID, sequence, timestamp, RunState.CREATED, RunState.QUEUED)
+        }
+        val engine = RecordingEngine { request ->
+            assertTrue(request is AgentEngineRequest.ToolAction)
+            flow { emit(AgentEngineEvent.Completed("已创建日程：起床")) }
+        }
+        val resolver = ActionResolver { context ->
+            if (context.continuationResponses["action:calendar"] == null) {
+                ActionResolution.NeedsInput("action:calendar", "请补充日期和时间")
+            } else {
+                ActionResolution.Prepared(
+                    PreparedToolInvocation(
+                        CapabilityId("android.calendar.create_event"),
+                        "{}",
+                        "创建日程",
+                    )
+                )
+            }
+        }
+        val scheduler = scheduler(store, engine, listOf(resolver))
+        try {
+            scheduler.enqueue(RUN_ID)
+            advanceUntilIdle()
+            assertEquals(RunState.WAITING_USER_INPUT, store.snapshot(RUN_ID).state)
+            assertEquals(0, engine.executions)
+
+            scheduler.continueRun(RUN_ID, UserContinuation.Input("action:calendar", "明天八点"))
+            advanceUntilIdle()
+
+            assertEquals(1, engine.executions)
+            assertEquals(RunState.COMPLETED, store.snapshot(RUN_ID).state)
+            assertEquals("已创建日程：起床", store.snapshot(RUN_ID).finalOutput)
+        } finally {
+            scheduler.close()
+        }
+    }
+
     @Test
     fun startupReplaysSafeRunningRun() = runTest {
         val store = runningStore()
@@ -249,11 +294,13 @@ class RunSchedulerRecoveryTest {
     private fun kotlinx.coroutines.test.TestScope.scheduler(
         store: InMemoryRunStore,
         engine: RecordingEngine,
+        actionResolvers: List<ActionResolver> = emptyList(),
     ) = RunScheduler(
         store = store,
         engine = engine,
         rootAgent = ROOT_AGENT,
         workerAgents = emptyList(),
+        actionResolvers = actionResolvers,
         dispatcher = StandardTestDispatcher(testScheduler),
     )
 

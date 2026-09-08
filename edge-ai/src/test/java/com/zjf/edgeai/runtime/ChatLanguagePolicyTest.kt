@@ -63,4 +63,20 @@ class ChatLanguagePolicyTest {
         assertEquals(64, ChatLanguagePolicy.REPETITION_WINDOW_SIZE)
         assertEquals(3, ChatLanguagePolicy.NO_REPEAT_NGRAM_SIZE)
     }
+
+    @Test
+    fun agentPolicyAllowsOnlyRegisteredToolsAndRequiresSuccessfulReceipt() {
+        val instruction = ChatLanguagePolicy.AGENT_SYSTEM_INSTRUCTION
+
+        assertTrue(instruction.contains("已注册能力"))
+        assertTrue(instruction.contains("成功 ToolResult"))
+        assertFalse(instruction.contains("不能操作手机"))
+        assertEquals(
+            "",
+            ChatLanguagePolicy.literalPreservationSuffix(
+                "帮我定个明天早上八点起床的日程",
+                "正在准备日程审批",
+            ),
+        )
+    }
 }

@@ -45,4 +45,5 @@
   <string name="agent_deny">拒绝</string>
   <string name="agent_continue">提交补充信息</string>
   <string name="agent_cancel">取消任务</string>
+  <string name="calendar_approve_create">批准并创建</string>
 </resources>

@@ -4,9 +4,11 @@ import com.zjf.edgeai.agent.api.AgentDefinition
 import com.zjf.edgeai.agent.api.AgentEngine
 import com.zjf.edgeai.agent.api.AgentEngineEvent
 import com.zjf.edgeai.agent.api.AgentEngineRequest
+import com.zjf.edgeai.agent.api.AgentEvent
 import com.zjf.edgeai.agent.api.AgentFailure
 import com.zjf.edgeai.agent.api.ApprovalDecision
 import com.zjf.edgeai.agent.api.ApprovalId
+import com.zjf.edgeai.agent.api.ApprovalRequest
 import com.zjf.edgeai.agent.api.CapabilityId
 import com.zjf.edgeai.agent.api.DelegationMode
 import com.zjf.edgeai.agent.api.ExecutionPlan
@@ -50,6 +52,12 @@ import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * 不依赖特定编排框架的基础 Agent 引擎。ADK 适配器可替换它，但公共语义保持一致。
@@ -88,6 +96,7 @@ class ProviderAgentEngine(
             is AgentEngineRequest.Single -> request.request.budget
             is AgentEngineRequest.Supervisor -> request.request.budget
             is AgentEngineRequest.Workflow -> request.request.budget
+            is AgentEngineRequest.ToolAction -> request.request.budget
         }
         activeBudgets[request.runId] = RunBudgetTracker(budget)
         try {
@@ -96,6 +105,7 @@ class ProviderAgentEngine(
                     is AgentEngineRequest.Single -> collector.executeSingle(request)
                     is AgentEngineRequest.Supervisor -> collector.executeSupervisor(request)
                     is AgentEngineRequest.Workflow -> collector.executeWorkflow(request)
+                    is AgentEngineRequest.ToolAction -> collector.executeToolAction(request)
                 }
             }
         } catch (timeout: TimeoutCancellationException) {
@@ -126,6 +136,195 @@ class ProviderAgentEngine(
         }
     }
 
+    private suspend fun kotlinx.coroutines.flow.FlowCollector<AgentEngineEvent>.executeToolAction(
+        request: AgentEngineRequest.ToolAction,
+    ) {
+        val runtime = requireNotNull(toolRuntime) { "确定性动作缺少 ToolRuntime" }
+        val descriptor = runtime.descriptors(request.agent.capabilityAllowlist)
+            .firstOrNull { it.capabilityId == request.invocation.capabilityId }
+            ?: run {
+                emit(
+                    AgentEngineEvent.Failed(
+                        AgentFailure(
+                            "CAPABILITY_NOT_REGISTERED",
+                            "未注册客户端能力 ${request.invocation.capabilityId.value}",
+                            false,
+                        )
+                    )
+                )
+                return
+            }
+        requireNotNull(activeBudgets[request.runId]).consumeToolCall()
+        var call = ToolCall(
+            id = ToolCallId(
+                "${request.runId.value}:action:${request.invocation.capabilityId.value}"
+            ),
+            runId = request.runId,
+            stepId = request.invocation.stepId,
+            capabilityId = request.invocation.capabilityId,
+            argumentsJson = request.invocation.argumentsJson,
+            idempotent = descriptor.idempotent,
+            displayPreview = request.invocation.preview,
+        )
+        repeat(MAX_DIRECT_ACTION_ATTEMPTS) { attempt ->
+            emit(AgentEngineEvent.ToolRequested(call))
+            val rawResult = runtime.invoke(
+                call = call,
+                sessionId = request.request.sessionId,
+                privacyLevel = request.request.privacyLevel,
+                allowlist = request.agent.capabilityAllowlist,
+                requestApproval = { approval ->
+                    approvalDecision(request.runId, approval) ?: run {
+                        val deferred = CompletableDeferred<ApprovalDecision>()
+                        pendingApprovals[approval.id] = PendingApproval(request.runId, deferred)
+                        emit(AgentEngineEvent.ApprovalRequired(approval))
+                        try {
+                            deferred.await()
+                        } finally {
+                            pendingApprovals.remove(approval.id)
+                        }
+                    }
+                },
+                onExecutionStarted = { emit(AgentEngineEvent.ToolStarted(call)) },
+            )
+            val result = rawResult.copy(
+                contentJson = guardrails.evaluate(
+                    request.runId,
+                    GuardrailStage.TOOL_RESULT,
+                    rawResult.contentJson,
+                    if (rawResult.untrusted) TrustLevel.UNTRUSTED_EXTERNAL else TrustLevel.TRUSTED_LOCAL,
+                    request.request.privacyLevel,
+                )
+            )
+            emit(
+                AgentEngineEvent.ToolCompleted(
+                    call,
+                    result,
+                    when {
+                        result.successful -> ToolCallState.SUCCEEDED
+                        result.failure?.code == "CALENDAR_EXTERNAL_STATE_UNKNOWN" -> ToolCallState.UNKNOWN
+                        else -> ToolCallState.FAILED
+                    },
+                )
+            )
+            if (result.successful) {
+                emit(AgentEngineEvent.Completed(result.userMessageOrJson()))
+                return
+            }
+            val resultFailure = result.failure
+            when (resultFailure?.code) {
+                "CALENDAR_SELECTION_REQUIRED" -> {
+                    val choices = resultFailure.details["choices"]
+                        ?.lineSequence()?.filter(String::isNotBlank)?.toList().orEmpty()
+                    val requestId = "tool-action:${call.id.value}:calendar"
+                    val selected = restoredInputs.remove(requestId)?.second ?: run {
+                        val deferred = CompletableDeferred<String>()
+                        pendingInputs[requestId] = request.runId to deferred
+                        emit(
+                            AgentEngineEvent.InputRequired(
+                                requestId,
+                                resultFailure.details["inputPrompt"]
+                                    ?: "请选择要写入的日历",
+                                choices,
+                            )
+                        )
+                        try {
+                            deferred.await()
+                        } finally {
+                            pendingInputs.remove(requestId)
+                        }
+                    }
+                    val calendarId = selected.substringBefore('|').trim().toLongOrNull()
+                    if (calendarId == null) {
+                        emit(
+                            AgentEngineEvent.Failed(
+                                AgentFailure(
+                                    "CALENDAR_SELECTION_INVALID",
+                                    "未创建日程：请选择列表中的有效日历",
+                                    true,
+                                )
+                            )
+                        )
+                        return
+                    }
+                    call = call.copy(
+                        argumentsJson = call.argumentsJson.withLongField("calendarId", calendarId),
+                        displayPreview = call.displayPreview.orEmpty() + "\n目标日历：$selected",
+                    )
+                }
+                "CALENDAR_EXTERNAL_STATE_UNKNOWN" -> {
+                    val requestId = "tool-action:${call.id.value}:external-state:$attempt"
+                    val answer = restoredInputs.remove(requestId)?.second ?: run {
+                        val deferred = CompletableDeferred<String>()
+                        pendingInputs[requestId] = request.runId to deferred
+                        emit(
+                            AgentEngineEvent.InputRequired(
+                                requestId,
+                                "无法确认日历是否已经写入。是否重新核验？",
+                                listOf("重新核验", "结束并标记未创建"),
+                            )
+                        )
+                        try {
+                            deferred.await()
+                        } finally {
+                            pendingInputs.remove(requestId)
+                        }
+                    }
+                    if (answer !in setOf("重新核验", "retry", "重试", "确认重试")) {
+                        emit(
+                            AgentEngineEvent.Failed(
+                                AgentFailure(
+                                    "CALENDAR_EXTERNAL_STATE_UNCONFIRMED",
+                                    "未创建日程：外部写入状态无法确认",
+                                    false,
+                                )
+                            )
+                        )
+                        return
+                    }
+                }
+                else -> {
+                    val failure = resultFailure ?: AgentFailure(
+                        "TOOL_ACTION_FAILED",
+                        "客户端动作执行失败",
+                        false,
+                    )
+                    val userVisibleFailure = if (
+                        call.capabilityId.value == "android.calendar.create_event" &&
+                        !failure.message.startsWith("未创建日程")
+                    ) {
+                        failure.copy(message = "未创建日程：${failure.message}")
+                    } else failure
+                    emit(
+                        AgentEngineEvent.Failed(userVisibleFailure)
+                    )
+                    return
+                }
+            }
+        }
+        emit(
+            AgentEngineEvent.Failed(
+                AgentFailure(
+                    "TOOL_ACTION_RETRY_EXHAUSTED",
+                    "未创建日程：工具动作超过安全重试次数",
+                    false,
+                )
+            )
+        )
+    }
+
+    private fun String.withLongField(name: String, value: Long): String {
+        val fields = Json.parseToJsonElement(this).jsonObject.toMutableMap()
+        fields[name] = JsonPrimitive(value)
+        return JsonObject(fields).toString()
+    }
+
+    private fun com.zjf.edgeai.agent.api.ToolResult.userMessageOrJson(): String =
+        runCatching {
+            Json.parseToJsonElement(contentJson).jsonObject["userMessage"]
+                ?.jsonPrimitive?.contentOrNull
+        }.getOrNull().orEmpty().ifBlank { contentJson }
+
     private suspend fun kotlinx.coroutines.flow.FlowCollector<AgentEngineEvent>.executeSingle(
         request: AgentEngineRequest.Single,
     ) {
@@ -153,6 +352,7 @@ class ProviderAgentEngine(
                 emitTokens = true,
                 privacyLevel = request.request.privacyLevel,
                 includeSessionHistory = true,
+                originalUserInput = request.request.input,
             )
             finalText = turn.text.ifBlank { finalText }
             if (turn.toolCalls.isEmpty()) {
@@ -201,7 +401,7 @@ class ProviderAgentEngine(
                     privacyLevel = request.request.privacyLevel,
                     allowlist = request.agent.capabilityAllowlist,
                     requestApproval = { approval ->
-                        restoredApprovals.remove(approval.id)?.second ?: run {
+                        approvalDecision(request.runId, approval) ?: run {
                             val deferred = CompletableDeferred<ApprovalDecision>()
                             pendingApprovals[approval.id] = PendingApproval(request.runId, deferred)
                             emit(AgentEngineEvent.ApprovalRequired(approval))
@@ -574,7 +774,7 @@ class ProviderAgentEngine(
                         privacyLevel = request.request.privacyLevel,
                         allowlist = request.rootAgent.capabilityAllowlist,
                         requestApproval = { approval ->
-                            restoredApprovals.remove(approval.id)?.second ?: run {
+                            approvalDecision(request.runId, approval) ?: run {
                                 val deferred = CompletableDeferred<ApprovalDecision>()
                                 pendingApprovals[approval.id] = PendingApproval(request.runId, deferred)
                                 emit(AgentEngineEvent.ApprovalRequired(approval))
@@ -641,6 +841,24 @@ class ProviderAgentEngine(
         emit(AgentEngineEvent.Completed(evaluate(request.definition.plan.finalNodeId)))
     }
 
+    private suspend fun approvalDecision(
+        runId: RunId,
+        approval: ApprovalRequest,
+    ): ApprovalDecision? {
+        restoredApprovals.remove(approval.id)?.let { restored ->
+            require(restored.first == runId) { "审批不属于当前 Run" }
+            return restored.second
+        }
+        return runStore?.events(runId)
+            ?.filterIsInstance<AgentEvent.ApprovalLifecycle>()
+            ?.lastOrNull { lifecycle ->
+                lifecycle.request.id == approval.id &&
+                    lifecycle.request.capabilityId == approval.capabilityId &&
+                    lifecycle.request.argumentsJson == approval.argumentsJson
+            }
+            ?.decision
+    }
+
     private data class ModelTurn(
         val text: String,
         val toolCalls: List<com.zjf.edgeai.agent.api.ModelToolCall>,
@@ -656,6 +874,7 @@ class ProviderAgentEngine(
         emitTokens: Boolean,
         privacyLevel: PrivacyLevel,
         includeSessionHistory: Boolean,
+        originalUserInput: String? = null,
     ): ModelTurn {
         val budget = requireNotNull(activeBudgets[runId]) { "RunBudgetTracker 不存在" }
         val relevantMemories = memoryService?.search(
@@ -737,6 +956,7 @@ class ProviderAgentEngine(
                         tools,
                         agent.budget.maxModelTokens,
                         privacyLevel,
+                        originalUserInput = originalUserInput,
                     ),
                 ).collect { response ->
                     when (response) {
@@ -830,5 +1050,6 @@ class ProviderAgentEngine(
 
     private companion object {
         const val MAX_TOOL_ARGUMENT_REPAIRS = 2
+        const val MAX_DIRECT_ACTION_ATTEMPTS = 3
     }
 }

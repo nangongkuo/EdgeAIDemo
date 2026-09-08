@@ -360,7 +360,13 @@ class EdgeAiViewModel(
                 updateAssistant(assistantId) { current ->
                     current.copy(
                         text = current.text.ifBlank {
-                            event.output ?: event.failure?.let { "生成失败：${it.message}" }.orEmpty()
+                            event.output ?: event.failure?.let { failure ->
+                                if (
+                                    failure.message.startsWith("未创建日程") ||
+                                    failure.code.startsWith("CALENDAR_") ||
+                                    failure.code == "TOOL_DENIED"
+                                ) failure.message else "生成失败：${failure.message}"
+                            }.orEmpty()
                         },
                         streaming = false,
                     )

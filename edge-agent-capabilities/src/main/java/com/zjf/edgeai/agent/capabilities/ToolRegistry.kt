@@ -219,9 +219,13 @@ class ToolRegistry(
         toolCallId = call.id,
         capabilityId = call.capabilityId,
         riskLevel = descriptor.riskLevel,
-        reason = "${descriptor.name} 需要 ${descriptor.riskLevel} 风险授权",
+        reason = buildString {
+            append("${descriptor.name} 需要 ${descriptor.riskLevel} 风险授权")
+            call.displayPreview?.takeIf(String::isNotBlank)?.let { append("\n").append(it) }
+        },
         argumentsJson = call.argumentsJson.take(4_000),
         createdAtEpochMillis = now(),
+        requiredAndroidPermissions = descriptor.requiredAndroidPermissions,
     )
 
     private suspend fun externalizeLargeResult(call: ToolCall, result: ToolResult): ToolResult {

@@ -3,9 +3,11 @@ package com.zjf.edgeai.agent.core
 import com.zjf.edgeai.agent.api.AgentDefinition
 import com.zjf.edgeai.agent.api.AgentEngineEvent
 import com.zjf.edgeai.agent.api.AgentEngineRequest
+import com.zjf.edgeai.agent.api.AgentEvent
 import com.zjf.edgeai.agent.api.AgentId
 import com.zjf.edgeai.agent.api.AgentRequest
 import com.zjf.edgeai.agent.api.ApprovalDecision
+import com.zjf.edgeai.agent.api.ApprovalId
 import com.zjf.edgeai.agent.api.ApprovalRequest
 import com.zjf.edgeai.agent.api.CapabilityId
 import com.zjf.edgeai.agent.api.DelegationMode
@@ -19,10 +21,13 @@ import com.zjf.edgeai.agent.api.ModelResponse
 import com.zjf.edgeai.agent.api.ModelToolCall
 import com.zjf.edgeai.agent.api.PlanNode
 import com.zjf.edgeai.agent.api.PlanNodeType
+import com.zjf.edgeai.agent.api.PreparedToolInvocation
+import com.zjf.edgeai.agent.api.RiskLevel
 import com.zjf.edgeai.agent.api.RunBudget
 import com.zjf.edgeai.agent.api.RunId
 import com.zjf.edgeai.agent.api.RemoteWorkerProvider
 import com.zjf.edgeai.agent.api.SessionId
+import com.zjf.edgeai.agent.api.StepId
 import com.zjf.edgeai.agent.api.ToolCall
 import com.zjf.edgeai.agent.api.ToolDescriptor
 import com.zjf.edgeai.agent.api.ToolResult
@@ -42,6 +47,168 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProviderAgentEngineOrchestrationTest {
+    @Test
+    fun deterministicToolActionReusesPersistedApprovalAfterProcessRecovery() = runTest {
+        val capability = CapabilityId("android.calendar.create_event")
+        val callId = com.zjf.edgeai.agent.api.ToolCallId(
+            "${RUN_ID.value}:action:${capability.value}"
+        )
+        val approval = ApprovalRequest(
+            id = ApprovalId("approval:${callId.value}"),
+            runId = RUN_ID,
+            toolCallId = callId,
+            capabilityId = capability,
+            riskLevel = RiskLevel.HIGH,
+            reason = "确认创建",
+            argumentsJson = "{}",
+            createdAtEpochMillis = 1,
+        )
+        val store = InMemoryRunStore { 2L }
+        store.create(RUN_ID, AgentRequest("帮我创建日程"), 1)
+        store.append(RUN_ID) { sequence, timestamp ->
+            AgentEvent.ApprovalLifecycle(
+                RUN_ID,
+                sequence,
+                timestamp,
+                approval,
+                ApprovalDecision.APPROVE_ONCE,
+            )
+        }
+        var executions = 0
+        val runtime = object : ToolRuntime {
+            override suspend fun descriptors(allowlist: Set<CapabilityId>) = listOf(
+                ToolDescriptor(
+                    capability,
+                    "android_calendar_create_event",
+                    "创建日程",
+                    "{\"type\":\"object\"}",
+                    riskLevel = RiskLevel.HIGH,
+                    idempotent = false,
+                )
+            )
+
+            override suspend fun invoke(
+                call: ToolCall,
+                sessionId: SessionId,
+                allowlist: Set<CapabilityId>,
+                privacyLevel: com.zjf.edgeai.agent.api.PrivacyLevel,
+                requestApproval: suspend (ApprovalRequest) -> ApprovalDecision,
+                onExecutionStarted: suspend () -> Unit,
+            ): ToolResult {
+                assertEquals(ApprovalDecision.APPROVE_ONCE, requestApproval(approval))
+                onExecutionStarted()
+                executions++
+                return ToolResult(call.id, true, "{\"userMessage\":\"已创建日程\"}")
+            }
+
+            override fun close() = Unit
+        }
+        val engine = ProviderAgentEngine(
+            listOf(FakeProvider { listOf(ModelResponse.Completed("不应调用")) }),
+            toolRuntime = runtime,
+            runStore = store,
+        )
+
+        val events = engine.execute(
+            AgentEngineRequest.ToolAction(
+                RUN_ID,
+                AgentRequest("帮我创建日程"),
+                ROOT.copy(capabilityAllowlist = setOf(capability)),
+                PreparedToolInvocation(capability, "{}", "创建日程", StepId("calendar")),
+            )
+        ).toList()
+
+        assertEquals(1, executions)
+        assertFalse(events.any { it is AgentEngineEvent.ApprovalRequired })
+        assertTrue(events.last() is AgentEngineEvent.Completed)
+    }
+
+    @Test
+    fun deterministicToolActionUsesApprovalRuntimeWithoutCallingModel() = runTest {
+        var modelCalls = 0
+        val provider = FakeProvider { modelCalls++; listOf(ModelResponse.Completed("不应调用")) }
+        val capability = CapabilityId("android.calendar.create_event")
+        val runtime = object : ToolRuntime {
+            var invocations = 0
+            override suspend fun descriptors(allowlist: Set<CapabilityId>) = listOf(
+                ToolDescriptor(
+                    capability,
+                    "android_calendar_create_event",
+                    "创建日程",
+                    "{\"type\":\"object\"}",
+                    riskLevel = RiskLevel.HIGH,
+                    idempotent = false,
+                    requiredAndroidPermissions = setOf("android.permission.WRITE_CALENDAR"),
+                )
+            )
+
+            override suspend fun invoke(
+                call: ToolCall,
+                sessionId: SessionId,
+                allowlist: Set<CapabilityId>,
+                privacyLevel: com.zjf.edgeai.agent.api.PrivacyLevel,
+                requestApproval: suspend (ApprovalRequest) -> ApprovalDecision,
+                onExecutionStarted: suspend () -> Unit,
+            ): ToolResult {
+                val decision = requestApproval(
+                    ApprovalRequest(
+                        ApprovalId("approval:${call.id.value}"),
+                        call.runId,
+                        call.id,
+                        call.capabilityId,
+                        RiskLevel.HIGH,
+                        "确认创建",
+                        call.argumentsJson,
+                        1,
+                        requiredAndroidPermissions = setOf("android.permission.WRITE_CALENDAR"),
+                    )
+                )
+                if (decision == ApprovalDecision.DENY) error("不应拒绝")
+                onExecutionStarted()
+                invocations++
+                return ToolResult(
+                    call.id,
+                    true,
+                    "{\"userMessage\":\"已创建日程：起床\\n事件 ID：123\"}",
+                )
+            }
+            override fun close() = Unit
+        }
+        val root = ROOT.copy(capabilityAllowlist = setOf(capability))
+        val engine = ProviderAgentEngine(listOf(provider), toolRuntime = runtime)
+        val events = engine.execute(
+            AgentEngineRequest.ToolAction(
+                RUN_ID,
+                AgentRequest("帮我创建日程"),
+                root,
+                PreparedToolInvocation(capability, "{}", "创建起床日程", StepId("calendar")),
+            )
+        ).onEach { event ->
+            if (event is AgentEngineEvent.ApprovalRequired) {
+                assertTrue(event.request.requiredAndroidPermissions.isNotEmpty())
+                engine.continueRun(
+                    RUN_ID,
+                    UserContinuation.Approval(event.request.id, ApprovalDecision.APPROVE_ONCE),
+                )
+            }
+        }.toList()
+
+        assertEquals(0, modelCalls)
+        assertEquals(1, runtime.invocations)
+        assertEquals(
+            listOf(
+                AgentEngineEvent.ToolRequested::class,
+                AgentEngineEvent.ApprovalRequired::class,
+                AgentEngineEvent.ToolStarted::class,
+                AgentEngineEvent.ToolCompleted::class,
+                AgentEngineEvent.Completed::class,
+            ),
+            events.map { it::class },
+        )
+        assertTrue(events.last() is AgentEngineEvent.Completed)
+        assertTrue((events.last() as AgentEngineEvent.Completed).output.contains("事件 ID：123"))
+    }
+
     @Test
     fun parallelFanInEvaluatesSharedDagNodeOnlyOnce() = runTest {
         var modelCalls = 0

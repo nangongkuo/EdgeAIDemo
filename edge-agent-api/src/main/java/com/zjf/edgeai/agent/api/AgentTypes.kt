@@ -115,6 +115,16 @@ sealed interface AgentEngineRequest {
         val rootAgent: AgentDefinition,
         val definition: WorkflowDefinition,
     ) : AgentEngineRequest
+
+    /** 已由受信任的客户端 Resolver 规范化、仍须经 ToolRuntime 审批和执行的动作。 */
+    @Serializable
+    @SerialName("tool_action")
+    data class ToolAction(
+        override val runId: RunId,
+        val request: AgentRequest,
+        val agent: AgentDefinition,
+        val invocation: PreparedToolInvocation,
+    ) : AgentEngineRequest
 }
 
 interface AgentEngine : AutoCloseable {

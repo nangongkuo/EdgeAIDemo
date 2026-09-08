@@ -6,6 +6,9 @@ import com.zjf.edgeai.agent.api.AgentEngineRequest
 import com.zjf.edgeai.agent.api.AgentEvent
 import com.zjf.edgeai.agent.api.AgentFailure
 import com.zjf.edgeai.agent.api.AgentRequest
+import com.zjf.edgeai.agent.api.ActionResolution
+import com.zjf.edgeai.agent.api.ActionResolutionContext
+import com.zjf.edgeai.agent.api.ActionResolver
 import com.zjf.edgeai.agent.api.RunId
 import com.zjf.edgeai.agent.api.RunSnapshot
 import com.zjf.edgeai.agent.api.RunState
@@ -40,6 +43,7 @@ class RunScheduler(
     private val rootAgent: com.zjf.edgeai.agent.api.AgentDefinition,
     private val workerAgents: List<com.zjf.edgeai.agent.api.AgentDefinition>,
     workflows: List<com.zjf.edgeai.agent.api.WorkflowDefinition> = emptyList(),
+    private val actionResolvers: List<ActionResolver> = emptyList(),
     private val router: RequestRouter = DeterministicRequestRouter(),
     ioConcurrency: Int = 3,
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
@@ -108,12 +112,94 @@ class RunScheduler(
         try {
             val request = store.request(runId)
             transition(runId, RunState.PLANNING, retryFrom?.let { "从检查点 ${it.value} 重试" })
+            val previousEvents = store.events(runId)
+            val continuationResponses = previousEvents
+                .filterIsInstance<AgentEvent.UserInputRequired>()
+                .mapNotNull { event -> event.response?.let { event.requestId to it } }
+                .toMap()
+            val actionContext = ActionResolutionContext(
+                request = request,
+                continuationResponses = continuationResponses,
+                sessionHistory = store.sessionHistory(request.sessionId),
+            )
+            val resolvedAction = actionResolvers.firstNotNullOfOrNull { it.resolve(actionContext) }
+            val action = if (resolvedAction is ActionResolution.Prepared) {
+                previousEvents.filterIsInstance<AgentEvent.ToolLifecycle>()
+                    .lastOrNull {
+                        it.call.capabilityId == resolvedAction.invocation.capabilityId &&
+                            it.state != ToolCallState.SUCCEEDED
+                    }
+                    ?.call
+                    ?.let { persistedCall ->
+                        ActionResolution.Prepared(
+                            resolvedAction.invocation.copy(
+                                argumentsJson = persistedCall.argumentsJson,
+                                preview = persistedCall.displayPreview ?: resolvedAction.invocation.preview,
+                                stepId = persistedCall.stepId,
+                            )
+                        )
+                    } ?: resolvedAction
+            } else resolvedAction
+            when (action) {
+                is ActionResolution.NeedsInput -> {
+                    store.append(runId) { sequence, timestamp ->
+                        AgentEvent.RouteSelected(
+                            runId,
+                            sequence,
+                            timestamp,
+                            RoutingHint.SINGLE_AGENT,
+                            "确定性客户端动作缺少必要参数",
+                        )
+                    }
+                    store.append(runId) { sequence, timestamp ->
+                        AgentEvent.UserInputRequired(
+                            runId,
+                            sequence,
+                            timestamp,
+                            action.requestId,
+                            action.prompt,
+                            action.choices,
+                        )
+                    }
+                    transition(runId, RunState.WAITING_USER_INPUT, "等待补全客户端动作参数")
+                    return
+                }
+                is ActionResolution.Answer -> {
+                    store.append(runId) { sequence, timestamp ->
+                        AgentEvent.RouteSelected(
+                            runId,
+                            sequence,
+                            timestamp,
+                            RoutingHint.SINGLE_AGENT,
+                            "根据当前 Session 的工具回执直接回答",
+                        )
+                    }
+                    terminal(runId, RunState.COMPLETED, action.output)
+                    return
+                }
+                else -> Unit
+            }
             val route = router.route(request)
             store.append(runId) { sequence, timestamp ->
-                AgentEvent.RouteSelected(runId, sequence, timestamp, route.route, route.reason)
+                AgentEvent.RouteSelected(
+                    runId,
+                    sequence,
+                    timestamp,
+                    if (action is ActionResolution.Prepared) RoutingHint.SINGLE_AGENT else route.route,
+                    if (action is ActionResolution.Prepared) {
+                        "确定性客户端动作：${action.invocation.capabilityId.value}"
+                    } else route.reason,
+                )
             }
             transition(runId, RunState.RUNNING)
-            val engineRequest = when (route.route) {
+            val engineRequest = if (action is ActionResolution.Prepared) {
+                AgentEngineRequest.ToolAction(
+                    runId = runId,
+                    request = request,
+                    agent = rootAgent,
+                    invocation = action.invocation,
+                )
+            } else when (route.route) {
                 RoutingHint.SUPERVISOR -> AgentEngineRequest.Supervisor(
                     runId = runId,
                     request = request,
@@ -243,6 +329,21 @@ class RunScheduler(
                 }
             }
             is AgentEngineEvent.ApprovalRequired -> {
+                store.events(runId)
+                    .filterIsInstance<AgentEvent.ToolLifecycle>()
+                    .lastOrNull { it.call.id == event.request.toolCallId }
+                    ?.call
+                    ?.let { call ->
+                        store.append(runId) { sequence, timestamp ->
+                            AgentEvent.ToolLifecycle(
+                                runId,
+                                sequence,
+                                timestamp,
+                                call,
+                                ToolCallState.WAITING_APPROVAL,
+                            )
+                        }
+                    }
                 store.append(runId) { sequence, timestamp ->
                     AgentEvent.ApprovalLifecycle(runId, sequence, timestamp, event.request)
                 }
@@ -321,6 +422,11 @@ class RunScheduler(
             }
             return
         }
+        if (recoveryInput?.requestId?.startsWith("action:") == true) {
+            active[runId]?.join()
+            launchRun(runId, null)
+            return
+        }
         engine.continueRun(runId, continuation)
         if (active[runId]?.isActive != true) launchRun(runId, null)
     }
@@ -353,7 +459,9 @@ class RunScheduler(
                 .filterIsInstance<AgentEvent.ToolLifecycle>()
                 .lastOrNull { it.state == ToolCallState.RUNNING || it.state == ToolCallState.UNKNOWN }
                 ?.call
-                ?.takeIf { !it.idempotent }
+                ?.takeIf {
+                    !it.idempotent && it.capabilityId.value != "android.calendar.create_event"
+                }
             transition(runId, RunState.RECOVERING, "进程恢复")
             if (uncertainWrite != null) {
                 val requestId = "recovery:${uncertainWrite.id.value}"

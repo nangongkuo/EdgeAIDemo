@@ -36,6 +36,7 @@ internal class AdkModelBridge(
                 systemInstruction = "",
                 messages = messages,
                 maxOutputTokens = llmRequest.config.maxOutputTokens,
+                originalUserInput = messages.lastOrNull { it.role == "user" }?.text,
             ),
         ).collect { response ->
             when (response) {

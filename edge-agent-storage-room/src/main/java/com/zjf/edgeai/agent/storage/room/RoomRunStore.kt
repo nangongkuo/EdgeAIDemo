@@ -295,6 +295,7 @@ class RoomRunStore(
                     reason = event.request.reason,
                     argumentsJson = event.request.argumentsJson,
                     state = state,
+                    requiredAndroidPermissions = event.request.requiredAndroidPermissions,
                 )
             snapshot.copy(
                 pendingApprovals = if (event.decision == null) remaining + approval else remaining,

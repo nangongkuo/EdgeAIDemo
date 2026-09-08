@@ -31,6 +31,8 @@ data class ToolDescriptor(
     val version: String = "1",
     /** false 表示调用会离开设备；LOCAL_ONLY Run 会在审批前直接拒绝。 */
     val local: Boolean = true,
+    /** 宿主在提交批准决定前按需申请的 Android 运行时权限。 */
+    val requiredAndroidPermissions: Set<String> = emptySet(),
 )
 
 @Serializable
@@ -43,6 +45,7 @@ data class ToolCall(
     val argumentsJson: String,
     val idempotent: Boolean = true,
     val idempotencyKey: String = "${runId.value}:${stepId.value}:${id.value}",
+    val displayPreview: String? = null,
 )
 
 @Serializable
@@ -66,7 +69,36 @@ data class ApprovalRequest(
     val argumentsJson: String,
     val createdAtEpochMillis: Long,
     val expiresAtEpochMillis: Long? = null,
+    val requiredAndroidPermissions: Set<String> = emptySet(),
 )
+
+@Serializable
+data class PreparedToolInvocation(
+    val capabilityId: CapabilityId,
+    val argumentsJson: String,
+    val preview: String,
+    val stepId: StepId = StepId("deterministic-action"),
+)
+
+data class ActionResolutionContext(
+    val request: AgentRequest,
+    val continuationResponses: Map<String, String> = emptyMap(),
+    val sessionHistory: List<SessionTurn> = emptyList(),
+)
+
+sealed interface ActionResolution {
+    data class Prepared(val invocation: PreparedToolInvocation) : ActionResolution
+    data class NeedsInput(
+        val requestId: String,
+        val prompt: String,
+        val choices: List<String> = emptyList(),
+    ) : ActionResolution
+    data class Answer(val output: String) : ActionResolution
+}
+
+fun interface ActionResolver {
+    suspend fun resolve(context: ActionResolutionContext): ActionResolution?
+}
 
 fun interface ToolExecutor {
     suspend fun execute(call: ToolCall): ToolResult

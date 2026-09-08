@@ -32,9 +32,11 @@ class EdgeLiteRtModelAdapter(
         val modelId = request.modelId ?: models.keys.first()
         val capabilities = models[modelId] ?: error("模型未注册: ${modelId.value}")
         val prompt = reconstructPrompt(request)
+        val originalUserInput = request.originalUserInput
+            ?: request.messages.lastOrNull { it.role == "user" }?.text.orEmpty()
         val bufferForTools = request.tools.isNotEmpty() && capabilities.toolCalling
         val output = StringBuilder()
-        host.generate(request.runId, modelId, prompt).collect { event ->
+        host.generate(request.runId, modelId, prompt, originalUserInput).collect { event ->
             when (event) {
                 is LiteRtHostEvent.Delta -> {
                     output.append(event.text)
@@ -57,17 +59,24 @@ class EdgeLiteRtModelAdapter(
     override fun close() = host.close()
 
     private fun reconstructPrompt(request: ModelRequest): String = buildString {
-        appendLine("[SYSTEM]")
+        appendLine("任务规则：")
         appendLine(request.systemInstruction)
         if (request.tools.isNotEmpty()) {
-            appendLine("[AVAILABLE_TOOLS]")
+            appendLine("可用工具：")
             appendLine("只提出工具调用，不得自行执行。需要调用时只输出 JSON：{\"name\":\"工具名\",\"arguments\":{...}}")
             request.tools.forEach { tool ->
                 appendLine("- ${tool.name}: ${tool.description}; schema=${tool.inputSchemaJson}")
             }
         }
         request.messages.forEach { message ->
-            appendLine("[${message.role.uppercase()}]")
+            appendLine(
+                when (message.role.lowercase()) {
+                    "user" -> "用户消息："
+                    "assistant", "model" -> "助手历史："
+                    "tool" -> "工具结果："
+                    else -> "上下文："
+                }
+            )
             if (message.text.isNotBlank()) appendLine(message.text)
             message.toolCalls.forEach { call ->
                 appendLine("工具调用 ${call.name} (${call.id.orEmpty()}): ${call.argumentsJson}")
@@ -79,7 +88,7 @@ class EdgeLiteRtModelAdapter(
                 appendLine("$boundary ${result.name} (${result.toolCallId.orEmpty()}): ${result.responseJson}")
             }
         }
-        append("[ASSISTANT]\n")
+        append("请直接回答最后一条用户消息：\n")
     }
 
     companion object {

@@ -1,15 +1,19 @@
 package com.zjf.edgeai.ui.agent
 
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.zjf.edgeai.agent.api.ApprovalDecision
+import com.zjf.edgeai.agent.api.ApprovalId
 import com.zjf.edgeai.databinding.FragmentAgentBinding
 import com.zjf.edgeai.ui.EdgeAiUiState
 import com.zjf.edgeai.ui.EdgeAiViewModel
@@ -19,6 +23,19 @@ class AgentFragment : Fragment() {
     private var _binding: FragmentAgentBinding? = null
     private val binding get() = _binding!!
     private val viewModel: EdgeAiViewModel by activityViewModels()
+    private var permissionApproval: Pair<ApprovalId, ApprovalDecision>? = null
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        val pending = permissionApproval
+        permissionApproval = null
+        val approvalId = pending?.first
+            ?: viewModel.uiState.value.approvals.firstOrNull()?.approvalId
+            ?: return@registerForActivityResult
+        val approvedDecision = pending?.second ?: ApprovalDecision.APPROVE_ONCE
+        val decision = if (result.values.all { it }) approvedDecision else ApprovalDecision.DENY
+        viewModel.decideApproval(approvalId, decision)
+    }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, state: Bundle?): View {
         _binding = FragmentAgentBinding.inflate(inflater, container, false)
@@ -33,14 +50,10 @@ class AgentFragment : Fragment() {
             viewModel.setLocalOnlyMode(enabled)
         }
         binding.approveOnce.setOnClickListener {
-            viewModel.uiState.value.approvals.firstOrNull()?.let { approval ->
-                viewModel.decideApproval(approval.approvalId, ApprovalDecision.APPROVE_ONCE)
-            }
+            approveWithPermissions(ApprovalDecision.APPROVE_ONCE)
         }
         binding.approveSession.setOnClickListener {
-            viewModel.uiState.value.approvals.firstOrNull()?.let { approval ->
-                viewModel.decideApproval(approval.approvalId, ApprovalDecision.APPROVE_SESSION)
-            }
+            approveWithPermissions(ApprovalDecision.APPROVE_SESSION)
         }
         binding.denyApproval.setOnClickListener {
             viewModel.uiState.value.approvals.firstOrNull()?.let { approval ->
@@ -59,6 +72,19 @@ class AgentFragment : Fragment() {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.uiState.collect(::render)
             }
+        }
+    }
+
+    private fun approveWithPermissions(decision: ApprovalDecision) {
+        val approval = viewModel.uiState.value.approvals.firstOrNull() ?: return
+        val missing = approval.requiredAndroidPermissions.filter { permission ->
+            ContextCompat.checkSelfPermission(requireContext(), permission) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) {
+            viewModel.decideApproval(approval.approvalId, decision)
+        } else {
+            permissionApproval = approval.approvalId to decision
+            permissionLauncher.launch(missing.toTypedArray())
         }
     }
 

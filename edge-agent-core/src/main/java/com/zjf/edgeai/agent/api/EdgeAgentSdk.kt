@@ -15,6 +15,8 @@ import com.zjf.edgeai.agent.capabilities.SkillRuntime
 import com.zjf.edgeai.agent.capabilities.SkillStore
 import com.zjf.edgeai.agent.capabilities.sandbox.IsolatedProcessJavaScriptSandbox
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 
 object EdgeAgentSdk {
     @JvmStatic
@@ -70,6 +72,20 @@ object EdgeAgentSdk {
             skillRuntime = skillRuntime,
             artifactStore = artifactStore,
         )
+        val declaredCapabilities = buildSet {
+            addAll(config.rootAgent.capabilityAllowlist)
+            config.workerAgents.forEach { addAll(it.capabilityAllowlist) }
+            config.workflows.flatMap { it.agents }.forEach { addAll(it.capabilityAllowlist) }
+        }
+        if (declaredCapabilities.isNotEmpty()) {
+            val registeredCapabilities = runBlocking(Dispatchers.IO) {
+                toolRuntime.descriptors().mapTo(linkedSetOf()) { it.capabilityId }
+            }
+            val missing = declaredCapabilities - registeredCapabilities
+            require(missing.isEmpty()) {
+                "Agent 声明了未注册能力: ${missing.joinToString { it.value }}"
+            }
+        }
         val engine = config.agentEngine ?: ProviderAgentEngine(
             providers = config.modelProviders,
             broker = ModelExecutionBroker(
@@ -88,6 +104,7 @@ object EdgeAgentSdk {
             rootAgent = config.rootAgent,
             workerAgents = config.workerAgents,
             workflows = config.workflows,
+            actionResolvers = config.actionResolvers,
             ioConcurrency = config.ioConcurrency,
         )
         return DefaultEdgeAgentClient(store, scheduler, config.defaultBudget)

@@ -99,6 +99,7 @@ data class ApprovalSnapshot(
     val reason: String,
     val argumentsJson: String,
     val state: ApprovalState,
+    val requiredAndroidPermissions: Set<String> = emptySet(),
 )
 
 @Serializable

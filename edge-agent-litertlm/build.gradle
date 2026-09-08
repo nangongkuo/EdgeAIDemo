@@ -24,6 +24,7 @@ dependencies {
   implementation project(':edge-agent-api')
   implementation project(':edge-agent-core')
   implementation project(':edge-agent-adk')
+  implementation project(':edge-agent-capabilities')
   implementation project(':edge-ai')
   api "com.google.ai.edge.litertlm:litertlm-android:$rootProject.ext.liteRtLmVersion"
   testImplementation 'junit:junit:4.13.2'

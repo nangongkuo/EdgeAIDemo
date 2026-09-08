@@ -107,7 +107,12 @@ class LiteRtEngineHost(
         }
     }
 
-    fun generate(runId: RunId, modelId: ModelId, prompt: String): Flow<LiteRtHostEvent> = flow {
+    fun generate(
+        runId: RunId,
+        modelId: ModelId,
+        prompt: String,
+        originalUserInput: String,
+    ): Flow<LiteRtHostEvent> = flow {
         executionMutex.withLock {
             check(!closed) { "LiteRT Engine Host 已关闭" }
             val slot = slots[modelId] ?: error("未注册本地模型 ${modelId.value}")
@@ -132,13 +137,13 @@ class LiteRtEngineHost(
                         }
                     }
                     updateBenchmark(slot, conversation, runId, attempt)
-                    val quality = ChatResponseQualityPolicy.assess(prompt, response.toString())
+                    val quality = ChatResponseQualityPolicy.assess(originalUserInput, response.toString())
                     slot.diagnostics.value = slot.diagnostics.value.copy(
                         lastGenerationAttempts = attempt,
                         lastResponseRejectedAsEcho = quality.rejectedAsEcho,
                     )
                     if (!quality.rejectedAsEcho) {
-                        ChatLanguagePolicy.literalPreservationSuffix(prompt, response.toString())
+                        ChatLanguagePolicy.literalPreservationSuffix(originalUserInput, response.toString())
                             .takeIf(String::isNotEmpty)
                             ?.let { emit(LiteRtHostEvent.Delta(it)) }
                         slot.lastUsedNanos = System.nanoTime()
@@ -259,7 +264,7 @@ class LiteRtEngineHost(
         )
         try {
             candidate.initialize()
-            val conversation = candidate.createConversation(ChatLanguagePolicy.createConversationConfig())
+            val conversation = candidate.createConversation(ChatLanguagePolicy.createAgentConversationConfig())
             slot.engine = candidate
             slot.conversation = conversation
         } catch (failure: Throwable) {
@@ -271,7 +276,7 @@ class LiteRtEngineHost(
     private fun rebuildConversation(slot: Slot) {
         val engine = slot.engine ?: error("LiteRT Engine 不可用")
         slot.conversation?.close()
-        slot.conversation = engine.createConversation(ChatLanguagePolicy.createConversationConfig())
+        slot.conversation = engine.createConversation(ChatLanguagePolicy.createAgentConversationConfig())
     }
 
     private fun updateBenchmark(
