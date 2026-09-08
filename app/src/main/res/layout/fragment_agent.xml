@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent">
+
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+      android:id="@+id/runSummary"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:background="@drawable/bg_status"
+      android:padding="12dp"
+      android:text="@string/agent_no_run"
+      android:textIsSelectable="true" />
+
+    <CheckBox
+      android:id="@+id/foregroundExecution"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="8dp"
+      android:text="@string/agent_foreground_execution" />
+
+    <CheckBox
+      android:id="@+id/localOnlyMode"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:checked="true"
+      android:text="@string/agent_local_only" />
+
+    <com.google.android.material.button.MaterialButton
+      android:id="@+id/cancelRun"
+      style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:enabled="false"
+      android:text="@string/agent_cancel" />
+
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="16dp"
+      android:text="Worker 图"
+      android:textAppearance="?attr/textAppearanceHeadline6" />
+
+    <TextView
+      android:id="@+id/workerGraph"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:fontFamily="monospace"
+      android:paddingVertical="8dp"
+      android:textIsSelectable="true" />
+
+    <LinearLayout
+      android:id="@+id/approvalPanel"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:background="@drawable/bg_status"
+      android:orientation="vertical"
+      android:padding="12dp"
+      android:visibility="gone">
+
+      <TextView
+        android:id="@+id/approvalText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textIsSelectable="true" />
+
+      <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+          android:id="@+id/approveOnce"
+          android:layout_width="0dp"
+          android:layout_height="wrap_content"
+          android:layout_weight="1"
+          android:text="@string/agent_approve_once" />
+
+        <Button
+          android:id="@+id/approveSession"
+          android:layout_width="0dp"
+          android:layout_height="wrap_content"
+          android:layout_weight="1"
+          android:text="@string/agent_approve_session" />
+
+        <Button
+          android:id="@+id/denyApproval"
+          android:layout_width="0dp"
+          android:layout_height="wrap_content"
+          android:layout_weight="1"
+          android:text="@string/agent_deny" />
+      </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+      android:id="@+id/inputPanel"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:orientation="vertical"
+      android:visibility="gone">
+
+      <TextView
+        android:id="@+id/inputPrompt"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
+      <EditText
+        android:id="@+id/continuationInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="补充信息"
+        android:inputType="textMultiLine" />
+
+      <Button
+        android:id="@+id/submitInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/agent_continue" />
+    </LinearLayout>
+
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="16dp"
+      android:text="Artifact"
+      android:textAppearance="?attr/textAppearanceHeadline6" />
+
+    <TextView
+      android:id="@+id/artifactText"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:paddingVertical="8dp"
+      android:textIsSelectable="true" />
+
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="8dp"
+      android:text="能力面"
+      android:textAppearance="?attr/textAppearanceHeadline6" />
+
+    <TextView
+      android:id="@+id/capabilityText"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:paddingVertical="8dp" />
+
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="8dp"
+      android:text="事件时间线"
+      android:textAppearance="?attr/textAppearanceHeadline6" />
+
+    <TextView
+      android:id="@+id/timelineText"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:fontFamily="monospace"
+      android:paddingVertical="8dp"
+      android:textIsSelectable="true" />
+  </LinearLayout>
+</ScrollView>

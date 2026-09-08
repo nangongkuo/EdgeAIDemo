@@ -29,6 +29,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 @OptIn(ExperimentalApi::class)
+@Suppress("DEPRECATION")
+@Deprecated("请使用 edge-agent-litertlm 的 EdgeAgentRuntime 或 EdgeAgentClient")
 class LiteRtLmRuntime(context: Context) : EdgeAiRuntime {
     companion object {
         private const val ERROR_LIMIT = 600

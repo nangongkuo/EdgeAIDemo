@@ -6,13 +6,15 @@ import androidx.viewpager2.adapter.FragmentStateAdapter
 import com.zjf.edgeai.ui.chat.ChatFragment
 import com.zjf.edgeai.ui.diagnostics.DiagnosticsFragment
 import com.zjf.edgeai.ui.model.ModelFragment
+import com.zjf.edgeai.ui.agent.AgentFragment
 
 class EdgeAiPagerAdapter(activity: FragmentActivity) : FragmentStateAdapter(activity) {
-    override fun getItemCount(): Int = 3
+    override fun getItemCount(): Int = 4
 
     override fun createFragment(position: Int): Fragment = when (position) {
         0 -> ModelFragment()
         1 -> ChatFragment()
+        2 -> AgentFragment()
         else -> DiagnosticsFragment()
     }
 }

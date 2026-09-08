@@ -1,8 +1,30 @@
 package com.zjf.edgeai.ui
 
 import android.net.Uri
-import com.zjf.edgeai.runtime.EdgeAiRuntime
-import com.zjf.edgeai.runtime.GenerationEvent
+import com.zjf.edgeai.agent.api.AgentId
+import com.zjf.edgeai.agent.api.AgentEvent
+import com.zjf.edgeai.agent.api.AgentRequest
+import com.zjf.edgeai.agent.api.ApprovalDecision
+import com.zjf.edgeai.agent.api.ApprovalId
+import com.zjf.edgeai.agent.api.ApprovalRequest
+import com.zjf.edgeai.agent.api.ApprovalSnapshot
+import com.zjf.edgeai.agent.api.ApprovalState
+import com.zjf.edgeai.agent.api.CapabilityId
+import com.zjf.edgeai.agent.api.EdgeAgentClient
+import com.zjf.edgeai.agent.api.ModelPolicy
+import com.zjf.edgeai.agent.api.PendingInputSnapshot
+import com.zjf.edgeai.agent.api.PrivacyLevel
+import com.zjf.edgeai.agent.api.RiskLevel
+import com.zjf.edgeai.agent.api.RunHandle
+import com.zjf.edgeai.agent.api.RunId
+import com.zjf.edgeai.agent.api.RunSnapshot
+import com.zjf.edgeai.agent.api.RunState
+import com.zjf.edgeai.agent.api.StepId
+import com.zjf.edgeai.agent.api.ToolCallId
+import com.zjf.edgeai.agent.api.UserContinuation
+import com.zjf.edgeai.agent.api.WorkerId
+import com.zjf.edgeai.agent.api.WorkerSnapshot
+import com.zjf.edgeai.agent.litertlm.AgentModelController
 import com.zjf.edgeai.runtime.RuntimeBackend
 import com.zjf.edgeai.runtime.RuntimeDiagnostics
 import com.zjf.edgeai.runtime.RuntimeState
@@ -11,6 +33,7 @@ import com.zjf.edgeai.runtime.model.ModelImportEvent
 import com.zjf.edgeai.runtime.model.ModelStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,220 +55,336 @@ import org.junit.Test
 class EdgeAiViewModelTest {
     private val dispatcher = UnconfinedTestDispatcher()
 
-    @Before
-    fun setUp() {
-        Dispatchers.setMain(dispatcher)
-    }
-
-    @After
-    fun tearDown() {
-        Dispatchers.resetMain()
-    }
+    @Before fun setUp() = Dispatchers.setMain(dispatcher)
+    @After fun tearDown() = Dispatchers.resetMain()
 
     @Test
-    fun streamingDeltasUpdateOneAssistantMessage() = runTest {
-        val runtime = FakeRuntime().apply {
-            generation = flowOf(
-                GenerationEvent.Delta("设备端 "),
-                GenerationEvent.Delta("AI"),
-                GenerationEvent.Completed(diagnostics.value)
+    fun agentEventsUpdateOneAssistantMessage() = runTest {
+        val client = FakeClient().apply {
+            events = flowOf(
+                token(1, "设备端 "),
+                token(2, "Agent"),
+                terminal(3, RunState.COMPLETED, "设备端 Agent"),
             )
         }
-        val viewModel = EdgeAiViewModel(FakeModelStore(selected = testModel), runtime)
+        val viewModel = EdgeAiViewModel(FakeModelStore(testModel), FakeController(client))
 
-        viewModel.sendPrompt("你好，Edge AI")
+        viewModel.sendPrompt("你好")
         advanceUntilIdle()
 
-        val messages = viewModel.uiState.value.messages
-        assertEquals(2, messages.size)
-        assertEquals(ChatRole.USER, messages[0].role)
-        assertEquals("你好，Edge AI", messages[0].text)
-        assertEquals(ChatRole.ASSISTANT, messages[1].role)
-        assertEquals("设备端 AI", messages[1].text)
-        assertFalse(messages[1].streaming)
+        assertEquals("你好", client.requests.single().input)
+        assertEquals("设备端 Agent", viewModel.uiState.value.messages.last().text)
+        assertFalse(viewModel.uiState.value.messages.last().streaming)
+        assertEquals(RunState.COMPLETED, viewModel.uiState.value.agentRunState)
     }
 
     @Test
-    fun mixedLanguagePromptIsForwardedAndRenderedWithoutRewriting() = runTest {
-        val runtime = FakeRuntime().apply {
-            generation = flowOf(GenerationEvent.Delta("这是中文说明。"))
+    fun modelResetRemovesRejectedAttempt() = runTest {
+        val client = FakeClient().apply {
+            events = flowOf(
+                token(1, "问题复述"),
+                AgentEvent.ModelReset(runId, 2, 2),
+                token(3, "正确回答"),
+                terminal(4, RunState.COMPLETED, "正确回答"),
+            )
         }
-        val viewModel = EdgeAiViewModel(FakeModelStore(selected = testModel), runtime)
-        val prompt = "  请 explain JVM 的 GC，并保留 Java  "
+        val viewModel = EdgeAiViewModel(FakeModelStore(testModel), FakeController(client))
 
-        viewModel.sendPrompt(prompt)
+        viewModel.sendPrompt("问题")
         advanceUntilIdle()
 
-        assertEquals(listOf(prompt), runtime.receivedPrompts)
-        assertEquals(prompt, viewModel.uiState.value.messages.first().text)
-        assertEquals(ChatRole.USER, viewModel.uiState.value.messages.first().role)
-        assertEquals("这是中文说明。", viewModel.uiState.value.messages.last().text)
-        assertEquals(ChatRole.ASSISTANT, viewModel.uiState.value.messages.last().role)
+        assertEquals("正确回答", viewModel.uiState.value.messages.last().text)
     }
 
     @Test
-    fun allWhitespacePromptDoesNotStartGeneration() = runTest {
-        val runtime = FakeRuntime()
-        val viewModel = EdgeAiViewModel(FakeModelStore(selected = testModel), runtime)
+    fun terminalFailureIsRendered() = runTest {
+        val client = FakeClient().apply {
+            events = flowOf(
+                AgentEvent.Terminal(
+                    runId,
+                    1,
+                    1,
+                    RunState.FAILED,
+                    failure = com.zjf.edgeai.agent.api.AgentFailure("FAIL", "native failure"),
+                )
+            )
+        }
+        val viewModel = EdgeAiViewModel(FakeModelStore(testModel), FakeController(client))
 
+        viewModel.sendPrompt("hello")
+        advanceUntilIdle()
+
+        assertEquals("native failure", viewModel.uiState.value.errorMessage)
+        assertTrue(viewModel.uiState.value.messages.last().text.contains("native failure"))
+    }
+
+    @Test
+    fun whitespaceDoesNotSubmitRun() = runTest {
+        val client = FakeClient()
+        val viewModel = EdgeAiViewModel(FakeModelStore(testModel), FakeController(client))
         viewModel.sendPrompt(" \n\t ")
         advanceUntilIdle()
-
-        assertTrue(runtime.receivedPrompts.isEmpty())
-        assertTrue(viewModel.uiState.value.messages.isEmpty())
+        assertTrue(client.requests.isEmpty())
     }
 
     @Test
-    fun generationFailureIsRenderedAndExposed() = runTest {
-        val runtime = FakeRuntime().apply {
-            generation = flowOf(GenerationEvent.Failed("native failure"))
-        }
-        val viewModel = EdgeAiViewModel(FakeModelStore(selected = testModel), runtime)
-
+    fun clearConversationClearsReplayState() = runTest {
+        val client = FakeClient().apply { events = flowOf(token(1, "answer")) }
+        val viewModel = EdgeAiViewModel(FakeModelStore(testModel), FakeController(client))
         viewModel.sendPrompt("hello")
         advanceUntilIdle()
-
-        val state = viewModel.uiState.value
-        assertEquals("native failure", state.errorMessage)
-        assertTrue(state.messages.last().text.contains("native failure"))
-        assertFalse(state.messages.last().streaming)
-    }
-
-    @Test
-    fun echoResetClearsFirstAttemptBeforeRenderingRetry() = runTest {
-        val runtime = FakeRuntime().apply {
-            generation = flowOf(
-                GenerationEvent.Delta("您好，您想在这台手机上做什么呢？"),
-                GenerationEvent.Reset,
-                GenerationEvent.Delta("我可以完全离线地进行文字问答，不能控制手机或访问网络。"),
-                GenerationEvent.Completed(diagnostics.value)
-            )
-        }
-        val viewModel = EdgeAiViewModel(FakeModelStore(selected = testModel), runtime)
-
-        viewModel.sendPrompt("你能在这台手机上做什么")
-        advanceUntilIdle()
-
-        val answer = viewModel.uiState.value.messages.last()
-        assertEquals("我可以完全离线地进行文字问答，不能控制手机或访问网络。", answer.text)
-        assertFalse(answer.streaming)
-    }
-
-    @Test
-    fun echoResetFollowedByFailureDoesNotLeaveRejectedText() = runTest {
-        val runtime = FakeRuntime().apply {
-            generation = flowOf(
-                GenerationEvent.Delta("您好，您想在这台手机上做什么呢？"),
-                GenerationEvent.Reset,
-                GenerationEvent.Failed("模型回复质量不符合要求")
-            )
-        }
-        val viewModel = EdgeAiViewModel(FakeModelStore(selected = testModel), runtime)
-
-        viewModel.sendPrompt("你能在这台手机上做什么")
-        advanceUntilIdle()
-
-        val state = viewModel.uiState.value
-        assertEquals("生成失败：模型回复质量不符合要求", state.messages.last().text)
-        assertEquals("模型回复质量不符合要求", state.errorMessage)
-        assertFalse(state.messages.last().streaming)
-    }
-
-    @Test
-    fun clearConversationResetsRuntimeAndMessages() = runTest {
-        val runtime = FakeRuntime().apply {
-            generation = flowOf(GenerationEvent.Delta("answer"))
-        }
-        val viewModel = EdgeAiViewModel(FakeModelStore(selected = testModel), runtime)
-        viewModel.sendPrompt("hello")
-        advanceUntilIdle()
-
         viewModel.clearConversation()
         advanceUntilIdle()
-
-        assertTrue(runtime.resetCalled)
         assertTrue(viewModel.uiState.value.messages.isEmpty())
+        assertTrue(viewModel.uiState.value.timeline.isEmpty())
     }
 
     @Test
-    fun startupInstallsBundledModelAndInitializesGpu() = runTest {
-        val modelStore = FakeModelStore(
-            selected = null,
-            bundledEvents = flowOf(
-                ModelImportEvent.Started(testModel.displayName, testModel.sizeBytes),
-                ModelImportEvent.Progress(testModel.sizeBytes, testModel.sizeBytes),
-                ModelImportEvent.Completed(testModel)
-            )
+    fun startupInstallsBundledModelAndInitializesController() = runTest {
+        val store = FakeModelStore(
+            null,
+            flowOf(ModelImportEvent.Completed(testModel)),
         )
-        val runtime = FakeRuntime(initialState = RuntimeState.Unloaded)
+        val controller = FakeController(FakeClient(), RuntimeState.Unloaded)
+        EdgeAiViewModel(store, controller)
+        advanceUntilIdle()
+        assertEquals(testModel, controller.initializedModel)
+        assertEquals(RuntimeBackend.GPU, controller.initializedBackend)
+    }
 
-        val viewModel = EdgeAiViewModel(modelStore, runtime)
+    @Test
+    fun supervisorWorkerAndRecoveryStatesAreRendered() = runTest {
+        val worker = WorkerSnapshot(
+            workerId = WorkerId("worker-1"),
+            agentId = AgentId("researcher"),
+            objective = "检索并核验",
+            state = RunState.COMPLETED,
+            depth = 1,
+            outputSummary = "已核验",
+        )
+        val client = FakeClient().apply {
+            events = flowOf(
+                AgentEvent.RunStateChanged(runId, 1, 1, RunState.RUNNING, RunState.RECOVERING),
+                AgentEvent.WorkerStateChanged(runId, 2, 2, worker),
+                terminal(3, RunState.COMPLETED, "汇总完成"),
+            )
+        }
+        val viewModel = EdgeAiViewModel(FakeModelStore(testModel), FakeController(client))
+
+        viewModel.sendPrompt("复杂任务")
         advanceUntilIdle()
 
-        assertEquals(testModel, runtime.initializedModel)
-        assertEquals(RuntimeBackend.GPU, runtime.initializedBackend)
-        assertEquals("模型已自动初始化", viewModel.uiState.value.importStatus)
-        assertFalse(viewModel.uiState.value.isImporting)
+        assertEquals(worker, viewModel.uiState.value.workers.single())
+        assertTrue(viewModel.uiState.value.timeline.any { it.contains("RECOVERING") })
+        assertTrue(viewModel.uiState.value.timeline.any { it.contains("Worker researcher") })
+    }
+
+    @Test
+    fun approvalIsRenderedAndContinued() = runTest {
+        val approvalId = ApprovalId("approval-1")
+        val capabilityId = CapabilityId("device.send_message")
+        val approval = ApprovalSnapshot(
+            approvalId = approvalId,
+            toolCallId = ToolCallId("call-1"),
+            capabilityId = capabilityId,
+            riskLevel = RiskLevel.HIGH,
+            reason = "将向外部发送消息",
+            argumentsJson = "{\"recipient\":\"张三\"}",
+            state = ApprovalState.PENDING,
+        )
+        val request = ApprovalRequest(
+            id = approvalId,
+            runId = RunId("run"),
+            toolCallId = ToolCallId("call-1"),
+            capabilityId = capabilityId,
+            riskLevel = RiskLevel.HIGH,
+            reason = approval.reason,
+            argumentsJson = approval.argumentsJson,
+            createdAtEpochMillis = 1,
+        )
+        val client = FakeClient().apply {
+            snapshotValue = snapshot(RunState.WAITING_APPROVAL, approvals = listOf(approval))
+            events = flowOf(
+                AgentEvent.RunStateChanged(runId, 1, 1, RunState.RUNNING, RunState.WAITING_APPROVAL),
+                AgentEvent.ApprovalLifecycle(runId, 2, 2, request),
+            )
+        }
+        val viewModel = EdgeAiViewModel(FakeModelStore(testModel), FakeController(client))
+
+        viewModel.sendPrompt("发送消息")
+        advanceUntilIdle()
+        assertEquals(approval, viewModel.uiState.value.approvals.single())
+
+        viewModel.decideApproval(approvalId, ApprovalDecision.APPROVE_ONCE)
+        advanceUntilIdle()
+        assertEquals(
+            UserContinuation.Approval(approvalId, ApprovalDecision.APPROVE_ONCE),
+            client.continuations.single().second,
+        )
+    }
+
+    @Test
+    fun humanInputIsRenderedAndContinued() = runTest {
+        val pending = PendingInputSnapshot("input-1", "请选择格式", listOf("Markdown", "JSON"))
+        val client = FakeClient().apply {
+            snapshotValue = snapshot(RunState.WAITING_USER_INPUT, inputs = listOf(pending))
+            events = flowOf(
+                AgentEvent.UserInputRequired(runId, 1, 1, pending.requestId, pending.prompt, pending.choices),
+            )
+        }
+        val viewModel = EdgeAiViewModel(FakeModelStore(testModel), FakeController(client))
+
+        viewModel.sendPrompt("生成报告")
+        advanceUntilIdle()
+        assertEquals(pending, viewModel.uiState.value.pendingInputs.single())
+
+        viewModel.continueInput(pending.requestId, "Markdown")
+        advanceUntilIdle()
+        assertEquals(
+            UserContinuation.Input(pending.requestId, "Markdown"),
+            client.continuations.single().second,
+        )
+    }
+
+    @Test
+    fun foregroundHostFollowsRunLifecycle() = runTest {
+        val client = FakeClient().apply {
+            events = flowOf(terminal(1, RunState.COMPLETED, "完成"))
+        }
+        val foreground = FakeForegroundHost()
+        val viewModel = EdgeAiViewModel(FakeModelStore(testModel), FakeController(client), foreground)
+        viewModel.setForegroundExecutionEnabled(true)
+
+        viewModel.sendPrompt("后台执行")
+        advanceUntilIdle()
+
+        assertEquals(listOf(client.runId), foreground.started)
+        assertTrue(foreground.stopCount >= 1)
+    }
+
+    @Test
+    fun cancellationPropagatesToClientAndStopsForegroundHost() = runTest {
+        val client = FakeClient().apply {
+            events = kotlinx.coroutines.flow.flow {
+                emit(AgentEvent.RunStateChanged(runId, 1, 1, RunState.QUEUED, RunState.RUNNING))
+                awaitCancellation()
+            }
+        }
+        val foreground = FakeForegroundHost()
+        val viewModel = EdgeAiViewModel(FakeModelStore(testModel), FakeController(client), foreground)
+        viewModel.setForegroundExecutionEnabled(true)
+        viewModel.sendPrompt("长任务")
+
+        viewModel.cancelActiveRun()
+        advanceUntilIdle()
+
+        assertEquals(listOf(client.runId), client.cancelledRuns)
+        assertTrue(foreground.stopCount >= 1)
+        assertFalse(viewModel.uiState.value.messages.last().streaming)
+    }
+
+    @Test
+    fun offlineModeSubmitsStrictLocalPolicy() = runTest {
+        val client = FakeClient().apply { events = flowOf(terminal(1, RunState.COMPLETED, "离线完成")) }
+        val viewModel = EdgeAiViewModel(FakeModelStore(testModel), FakeController(client))
+
+        viewModel.sendPrompt("不联网")
+        advanceUntilIdle()
+
+        assertEquals(ModelPolicy.LOCAL_ONLY, client.requests.single().modelPolicy)
+        assertEquals(PrivacyLevel.LOCAL_ONLY, client.requests.single().privacyLevel)
+    }
+
+    private class FakeClient : EdgeAgentClient {
+        val runId = RunId("run")
+        val requests = mutableListOf<AgentRequest>()
+        val continuations = mutableListOf<Pair<RunId, UserContinuation>>()
+        val cancelledRuns = mutableListOf<RunId>()
+        var events: Flow<AgentEvent> = emptyFlow()
+        var snapshotValue: RunSnapshot? = null
+        override suspend fun submit(request: AgentRequest): RunHandle {
+            requests += request
+            return RunHandle(runId, events)
+        }
+        override fun observe(runId: RunId) = events
+        override suspend fun snapshot(runId: RunId) = snapshotValue ?: snapshot(RunState.RUNNING)
+        override suspend fun continueRun(runId: RunId, continuation: UserContinuation) {
+            continuations += runId to continuation
+        }
+        override suspend fun cancel(runId: RunId) {
+            cancelledRuns += runId
+        }
+        override suspend fun retry(runId: RunId, fromStepId: StepId?) = Unit
+        override fun close() = Unit
+        fun token(sequence: Long, value: String) = AgentEvent.ModelToken(runId, sequence, sequence, value)
+        fun terminal(sequence: Long, state: RunState, output: String) =
+            AgentEvent.Terminal(runId, sequence, sequence, state, output)
+        fun snapshot(
+            state: RunState,
+            approvals: List<ApprovalSnapshot> = emptyList(),
+            inputs: List<PendingInputSnapshot> = emptyList(),
+        ) = RunSnapshot(
+            runId = runId,
+            sessionId = requests.lastOrNull()?.sessionId ?: com.zjf.edgeai.agent.api.SessionId("s"),
+            state = state,
+            pendingApprovals = approvals,
+            pendingInputs = inputs,
+            createdAtEpochMillis = 1,
+            updatedAtEpochMillis = 1,
+        )
+    }
+
+    private class FakeForegroundHost : AgentForegroundHost {
+        val started = mutableListOf<RunId>()
+        var stopCount = 0
+        override fun start(runId: RunId) { started += runId }
+        override fun stop() { stopCount += 1 }
+    }
+
+    private class FakeController(
+        fakeClient: EdgeAgentClient,
+        initialState: RuntimeState = RuntimeState.Ready(RuntimeBackend.GPU, RuntimeBackend.GPU),
+    ) : AgentModelController {
+        private val mutableState = MutableStateFlow(initialState)
+        override val state: StateFlow<RuntimeState> = mutableState
+        override val diagnostics: StateFlow<RuntimeDiagnostics> = MutableStateFlow(
+            RuntimeDiagnostics("test", "test", "test", 31, listOf("arm64-v8a"))
+        )
+        override val client: StateFlow<EdgeAgentClient?> = MutableStateFlow(fakeClient)
+        var initializedModel: ModelDescriptor? = null
+        var initializedBackend: RuntimeBackend? = null
+        override suspend fun initialize(model: ModelDescriptor, preferred: RuntimeBackend) {
+            initializedModel = model
+            initializedBackend = preferred
+            mutableState.value = RuntimeState.Ready(preferred, preferred)
+        }
+        override suspend fun unload() { mutableState.value = RuntimeState.Unloaded }
+        override fun close() = Unit
     }
 
     private class FakeModelStore(
         selected: ModelDescriptor?,
-        private val bundledEvents: Flow<ModelImportEvent> = emptyFlow()
+        private val bundledEvents: Flow<ModelImportEvent> = emptyFlow(),
     ) : ModelStore {
         override val selectedModel: StateFlow<ModelDescriptor?> = MutableStateFlow(selected)
-        override fun installBundledModel(): Flow<ModelImportEvent> = bundledEvents
+        override fun installBundledModel() = bundledEvents
         override fun importModel(uri: Uri): Flow<ModelImportEvent> = emptyFlow()
         override suspend fun deleteSelectedModel() = Unit
     }
 
-    private class FakeRuntime(initialState: RuntimeState = readyState) : EdgeAiRuntime {
-        companion object {
-            private val readyState = RuntimeState.Ready(RuntimeBackend.GPU, RuntimeBackend.GPU)
-        }
+    private fun token(sequence: Long, value: String) =
+        AgentEvent.ModelToken(RunId("run"), sequence, sequence, value)
 
-        private val ready = RuntimeState.Ready(RuntimeBackend.GPU, RuntimeBackend.GPU)
-        private val mutableState = MutableStateFlow(initialState)
-        override val state: StateFlow<RuntimeState> = mutableState
-        override val diagnostics: StateFlow<RuntimeDiagnostics> = MutableStateFlow(
-            RuntimeDiagnostics(
-                deviceManufacturer = "test",
-                deviceModel = "test",
-                androidApi = 31,
-                supportedAbis = listOf("arm64-v8a"),
-                preferredBackend = RuntimeBackend.GPU,
-                effectiveBackend = RuntimeBackend.GPU
-            )
-        )
-        var generation: Flow<GenerationEvent> = emptyFlow()
-        val receivedPrompts = mutableListOf<String>()
-        var resetCalled = false
-        var initializedModel: ModelDescriptor? = null
-        var initializedBackend: RuntimeBackend? = null
-
-        override suspend fun initialize(model: ModelDescriptor, preferred: RuntimeBackend) {
-            initializedModel = model
-            initializedBackend = preferred
-            mutableState.value = ready
-        }
-        override fun generate(prompt: String): Flow<GenerationEvent> {
-            receivedPrompts += prompt
-            return generation
-        }
-        override fun cancel() = Unit
-        override suspend fun resetConversation() {
-            resetCalled = true
-        }
-        override suspend fun unload() = Unit
-        override fun close() = Unit
-    }
+    private fun terminal(sequence: Long, state: RunState, output: String) =
+        AgentEvent.Terminal(RunId("run"), sequence, sequence, state, output)
 
     private companion object {
         val testModel = ModelDescriptor(
-            displayName = "gemma.litertlm",
-            absolutePath = "/tmp/gemma.litertlm",
-            sizeBytes = 1024L,
-            sha256 = "abc123",
-            importedAtEpochMillis = 1L
+            "gemma.litertlm",
+            "/tmp/gemma.litertlm",
+            1024,
+            "abc123",
+            1,
         )
     }
 }

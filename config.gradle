@@ -8,7 +8,7 @@ ext{
       versionCode: versionCode,
       versionName: versionName,
       applicationId: applicationId,
-      compileSdkVersion: 34,
+      compileSdkVersion: 36,
       minSdkVersion: 31,
       targetSdkVersion: 34]
 
@@ -25,4 +25,10 @@ ext{
   // LiteRT-LM POM declaring 1.9.0.
   coroutinesVersion = "1.11.0"
   liteRtLmVersion = "0.15.0"
+  adkKotlinVersion = "0.8.0"
+  roomVersion = "2.8.4"
+  serializationVersion = "1.9.0"
+  okhttpVersion = "4.12.0"
+  rhinoVersion = "1.8.0"
+  annotationsVersion = "1.9.1"
 }

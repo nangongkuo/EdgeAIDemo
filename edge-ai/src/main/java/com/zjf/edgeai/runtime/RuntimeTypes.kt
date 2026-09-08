@@ -52,6 +52,9 @@ data class RuntimeDiagnostics(
     val thinkingEnabled: Boolean? = null
 )
 
+@Deprecated(
+    message = "请迁移到 EdgeAgentClient；该接口仅作为 1.x 单 Agent 兼容门面保留",
+)
 interface EdgeAiRuntime : Closeable {
     val state: StateFlow<RuntimeState>
     val diagnostics: StateFlow<RuntimeDiagnostics>

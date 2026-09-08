@@ -2,17 +2,17 @@ package com.zjf.edgeai.runtime
 
 import java.util.Locale
 
-internal data class BackendSelection(
+data class BackendSelection(
     val effectiveBackend: RuntimeBackend,
     val gpuFailure: Throwable? = null
 )
 
-internal class BackendFallbackException(
+class BackendFallbackException(
     val gpuFailure: Throwable,
     val cpuFailure: Throwable
 ) : IllegalStateException("GPU and CPU initialization both failed", cpuFailure)
 
-internal data class AndroidDeviceSignature(
+data class AndroidDeviceSignature(
     val fingerprint: String,
     val model: String,
     val manufacturer: String,
@@ -21,7 +21,7 @@ internal data class AndroidDeviceSignature(
     val hardware: String
 )
 
-internal fun emulatorGpuPreflightFailure(
+fun emulatorGpuPreflightFailure(
     preferred: RuntimeBackend,
     device: AndroidDeviceSignature
 ): IllegalStateException? {
@@ -50,7 +50,7 @@ private fun AndroidDeviceSignature.isLikelyAndroidEmulator(): Boolean {
         hardwareValue.contains("ranchu")
 }
 
-internal fun selectRuntimeBackend(
+fun selectRuntimeBackend(
     preferred: RuntimeBackend,
     gpuPreflightFailure: Throwable? = null,
     initialize: (RuntimeBackend) -> Unit

@@ -3,6 +3,38 @@ plugins {
   id 'com.android.application' version '8.10.1' apply false
   id 'com.android.library' version '8.10.1' apply false
   id 'org.jetbrains.kotlin.android' version '2.2.21' apply false
+  id 'org.jetbrains.kotlin.plugin.serialization' version '2.2.21' apply false
+  id 'com.google.devtools.ksp' version '2.2.21-2.0.5' apply false
 }
 
 apply from: "config.gradle"
+
+tasks.register('verifyAgentApiBoundary') {
+  group = 'verification'
+  description = 'Ensures the public Agent SDK source does not expose implementation framework types.'
+  def apiSources = fileTree('edge-agent-api/src/main') { include '**/*.kt', '**/*.java' }
+  inputs.files(apiSources)
+  doLast {
+    def forbidden = [
+        'com.google.adk',
+        'com.google.ai.edge.litertlm',
+        'androidx.room',
+        'okhttp3',
+        'com.zjf.edgeai.agent.storage',
+        'com.zjf.edgeai.agent.core',
+        'com.zjf.edgeai.agent.capabilities',
+        'com.zjf.edgeai.agent.cloud'
+    ]
+    def leaks = []
+    apiSources.files.each { source ->
+      source.eachLine { line, number ->
+        forbidden.each { token ->
+          if (line.contains(token)) leaks << "${source}:${number}: ${token}"
+        }
+      }
+    }
+    if (!leaks.isEmpty()) {
+      throw new GradleException("Public API leaks implementation types:\n" + leaks.join('\n'))
+    }
+  }
+}

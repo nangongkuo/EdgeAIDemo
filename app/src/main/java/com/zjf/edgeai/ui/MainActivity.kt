@@ -25,6 +25,7 @@ class MainActivity : AppCompatActivity() {
                 when (position) {
                     0 -> R.string.tab_model
                     1 -> R.string.tab_chat
+                    2 -> R.string.tab_agent
                     else -> R.string.tab_diagnostics
                 }
             )

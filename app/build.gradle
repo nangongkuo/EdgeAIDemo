@@ -28,12 +28,13 @@ android {
     }
   }
   compileOptions {
-    sourceCompatibility JavaVersion.VERSION_17
-    targetCompatibility JavaVersion.VERSION_17
+    sourceCompatibility JavaVersion.VERSION_21
+    targetCompatibility JavaVersion.VERSION_21
   }
   kotlinOptions {
-    jvmTarget = '17'
+    jvmTarget = '21'
   }
+  kotlin { jvmToolchain(21) }
 
   buildFeatures {
     viewBinding true
@@ -41,6 +42,12 @@ android {
 
   androidResources {
     noCompress += ['litertlm']
+  }
+
+  packaging {
+    resources {
+      excludes += ['META-INF/INDEX.LIST', 'META-INF/DEPENDENCIES']
+    }
   }
 }
 
@@ -57,6 +64,10 @@ dependencies {
   implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:$rootProject.ext.coroutinesVersion"
   implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:$rootProject.ext.coroutinesVersion"
   implementation project(':edge-ai')
+  implementation project(':edge-agent-api')
+  implementation project(':edge-agent-core')
+  implementation project(':edge-agent-litertlm')
+  implementation project(':edge-agent-adk')
 
   testImplementation 'junit:junit:4.13.2'
   testImplementation 'androidx.arch.core:core-testing:2.2.0'

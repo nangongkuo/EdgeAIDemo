@@ -3,14 +3,14 @@ package com.zjf.edgeai.runtime
 import java.util.Locale
 import kotlin.math.max
 
-internal data class ChatResponseQuality(
+data class ChatResponseQuality(
     val normalizedPrompt: String,
     val normalizedResponse: String,
     val similarity: Double,
     val rejectedAsEcho: Boolean
 )
 
-internal object ChatResponseQualityPolicy {
+object ChatResponseQualityPolicy {
     const val MAX_GENERATION_ATTEMPTS = 2
     const val ECHO_SIMILARITY_THRESHOLD = 0.72
     private const val MIN_COMPARABLE_LENGTH = 6

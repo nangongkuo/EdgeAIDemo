@@ -14,7 +14,7 @@ import com.google.ai.edge.litertlm.ThinkingConfig
  * The policy is deliberately static: the product default is Simplified Chinese, so script
  * detection would add ambiguity for mixed text, code, abbreviations, and proper names.
  */
-internal object ChatLanguagePolicy {
+object ChatLanguagePolicy {
     const val MAX_OUTPUT_TOKENS = 512
     const val TOP_K = 10
     const val TOP_P = 0.95

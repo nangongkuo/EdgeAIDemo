@@ -1,0 +1,30 @@
+plugins {
+  id 'com.android.library'
+  id 'org.jetbrains.kotlin.android'
+  id 'org.jetbrains.kotlin.plugin.serialization'
+}
+
+android {
+  namespace 'com.zjf.edgeai.agent.api'
+  compileSdk rootProject.ext.android.compileSdkVersion
+  defaultConfig {
+    minSdk rootProject.ext.android.minSdkVersion
+    consumerProguardFiles 'consumer-rules.pro'
+  }
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_21
+    targetCompatibility JavaVersion.VERSION_21
+  }
+  kotlinOptions { jvmTarget = '21' }
+}
+
+kotlin { jvmToolchain(21) }
+
+dependencies {
+  api "org.jetbrains.kotlinx:kotlinx-coroutines-core:$rootProject.ext.coroutinesVersion"
+  api "org.jetbrains.kotlinx:kotlinx-serialization-core:$rootProject.ext.serializationVersion"
+  api "org.jetbrains.kotlinx:kotlinx-serialization-json:$rootProject.ext.serializationVersion"
+  implementation "androidx.annotation:annotation:$rootProject.ext.annotationsVersion"
+  testImplementation 'junit:junit:4.13.2'
+  testImplementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:$rootProject.ext.coroutinesVersion"
+}

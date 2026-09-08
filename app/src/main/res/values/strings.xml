@@ -3,6 +3,7 @@
   <string name="app_name">Edge AI Demo</string>
   <string name="tab_model">模型</string>
   <string name="tab_chat">对话</string>
+  <string name="tab_agent">Agent</string>
   <string name="tab_diagnostics">诊断</string>
   <string name="model_section">LiteRT-LM 模型</string>
   <string name="backend_section">推理后端</string>
@@ -33,4 +34,15 @@
   <string name="role_user">你</string>
   <string name="role_assistant">设备端模型</string>
   <string name="diagnostics_unavailable">诊断信息不可用</string>
+  <string name="agent_notification_channel">Agent 后台任务</string>
+  <string name="agent_notification_title">Edge Agent 正在执行</string>
+  <string name="agent_notification_text">任务 %1$s 正在后台运行</string>
+  <string name="agent_no_run">当前没有 Agent 任务</string>
+  <string name="agent_foreground_execution">离开页面后继续运行（前台服务承载）</string>
+  <string name="agent_local_only">强制离线：仅允许端侧模型，禁止云端回退</string>
+  <string name="agent_approve_once">批准一次</string>
+  <string name="agent_approve_session">本会话批准</string>
+  <string name="agent_deny">拒绝</string>
+  <string name="agent_continue">提交补充信息</string>
+  <string name="agent_cancel">取消任务</string>
 </resources>

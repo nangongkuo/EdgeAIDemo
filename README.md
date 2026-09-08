@@ -1,103 +1,112 @@
-# EdgeAIDemo
+# EdgeAIDemo / EdgeAgent SDK 1.0
 
-This is a Google AI Edge SDK Demo.
+EdgeAIDemo 已从单会话 LiteRT-LM 示例升级为 Android 客户端 Agent SDK。SDK 采用“单 Agent 快速路径 + 确定性 Workflow + Supervisor/逻辑 Worker + 共享模型执行器 + Room 持久化任务闭环”，面向 Android 12+、ARM64 设备。
 
-`EdgeAIDemo` 是一个用于验证 Google AI Edge 端侧文本大模型能力的 Android Demo。应用不调用云端 API：APK 内置 Gemma 模型，首次启动将其安装到应用私有目录并自动初始化，之后的多轮对话完全在设备上完成。
-
-当前实现固定使用 `com.google.ai.edge.litertlm:litertlm-android:0.15.0`，应用包名为 `com.zjf.edgeai`。
-
-## Google AI Edge 技术栈
-
-- **LiteRT**：模型转换、硬件委托和底层推理运行时。
-- **LiteRT-LM**：建立在 LiteRT 之上的端侧大模型 API，提供模型加载、Tokenizer、Conversation、Kotlin Flow 流式响应和 CPU/GPU/NPU 后端。
-- **MediaPipe Tasks**：面向视觉、音频、文本等常见任务的高层任务 API。
-
-本项目只验证 LiteRT-LM 的离线文本生成，不包含多模态、Tool Calling、RAG、NPU 或云端服务。参考 [LiteRT-LM 概览](https://developers.google.com/edge/litert-lm/overview) 和 [Android 集成指南](https://developers.google.com/edge/litert-lm/android)。
+当前固定集成 Google ADK Kotlin `0.8.0` 与 LiteRT-LM `0.15.0`。ADK、LiteRT-LM、Room、OkHttp 等实现类型均不会暴露到 `edge-agent-api` 公共协议。
 
 ## 已实现能力
 
-- 将许可批准后的 Gemma `.litertlm` 作为不压缩 Asset 打进 APK；首次启动事务性释放并自动初始化。
-- 已存在有效私有模型时直接复用，避免每次启动重复复制；用户手动导入的替换模型优先于内置模型。
-- 使用 Storage Access Framework 导入 `.litertlm`，无需广泛存储权限。
-- 导入时复制到应用私有目录、计算 SHA-256、展示进度，并通过 `.partial` + 原子移动避免保留半成品。
-- 持久化模型元数据，应用重启后仍能识别已导入模型。
-- 默认尝试 GPU；初始化失败后完整释放失败实例并自动回退一次 CPU，UI 展示实际后端与回退原因。
-- 单线程串行管理 `Engine` / `Conversation` 的 JNI 生命周期。
-- 支持多轮对话、Flow 流式输出、停止生成、清空 Conversation 和显式卸载。
-- 展示 LiteRT-LM 版本、设备/ABI、模型摘要、初始化耗时、首 Token 延迟、Prefill/Decode Token 与吞吐率。
-- APK 只打包 `arm64-v8a`，最低支持 Android 12（API 31）。
+- `EdgeAgentClient`：提交、事件重放、Snapshot、审批/人工输入续跑、取消、检查点重试和释放。
+- Durable Run：Room Event Journal、投影表、进程恢复、幂等键、非幂等副作用状态未知保护。
+- 编排：单 Agent、Sequential/Parallel/Loop/HumanGate、Supervisor/Agent-as-Tool 逻辑 Worker、受控 Handoff。
+- 模型：LiteRT-LM GPU→CPU 回退、双模型注册、全局本地串行 Broker、云端并发、模型失败回退。
+- Tool Calling：手动执行、JSON Schema、能力白名单、参数修复、风险审批、结果截断与 Artifact。
+- Skill：APK Asset/应用私有目录安装、SHA-256/可选签名、渐进加载、指令/声明式 Workflow/隔离 JavaScript，并统一映射为 `skill.*` Tool。
+- MCP Client：Streamable HTTP、SSE 兼容、Session 重连、Schema 缓存、私密请求头和不可信内容边界。
+- A2A Client：JSON-RPC `message/send` Remote Worker、隐私/预算约束、取消和本地 Worker 降级。
+- 数据与安全：Session/长期记忆、FTS 与可选 Embedding、Artifact、Keystore Secret、Guardrail、脱敏 Trace。
+- Demo：模型、对话、Agent、诊断四个页面；展示 Run 时间线、Worker 图、审批、人工输入、Artifact 和能力状态，支持可选前台服务承载与强制离线模式。
 
-## 工程结构
-
-```text
-app/       Activity、ViewPager2 三个验证页、Activity 级 ViewModel
-edge-ai/   LiteRT-LM 封装、模型存储、后端回退与诊断数据
-openspec/  integrate-litert-lm-demo 的 proposal/design/tasks/delta specs
-```
-
-`Conversation` 和 `Engine` 按此顺序关闭。旋转屏幕时 Activity 级 ViewModel 会保留运行时；显式卸载、切换模型或 ViewModel 最终销毁时释放原生资源。
-
-## 准备模型
-
-推荐使用 [LiteRT Community Gemma3-1B-IT](https://huggingface.co/litert-community/Gemma3-1B-IT/tree/main) 中约 584 MB 的 INT4 `.litertlm` 模型。仓库中的文件名可能随版本调整；本方案最初验收文件为：
+## 模块
 
 ```text
-Gemma3-1B-IT_multi-prefill-seq_q4_ekv4096.litertlm
+edge-agent-api             稳定公共协议与扩展 SPI
+edge-agent-core            Run Coordinator、Router、Workflow、Supervisor、上下文与 Trace
+edge-agent-adk             ADK 0.8.0 Runner/AgentTool/Workflow 适配
+edge-agent-litertlm        LiteRT Engine Host、Model Adapter、双模型与诊断
+edge-agent-capabilities    Tool、Skill、MCP、A2A、审批、Keystore、JS 沙箱
+edge-agent-storage-room    Run/Event/Session/Memory/Artifact 与数据库迁移
+edge-agent-cloud-openai    OpenAI-compatible 流式模型 Provider
+edge-ai                    旧接口兼容门面与模型导入
+app                        SDK 演示应用
 ```
 
-当前文件列表也可能显示为 `gemma3-1b-it-int4.litertlm`。应用接受任意非空 `.litertlm` 文件，但模型是否与 LiteRT-LM 0.15.0 兼容仍由运行时校验。
+Worker 是独立目标、上下文、权限和预算的逻辑子 Agent，不是 Android WorkManager Worker，也不持有 LiteRT Engine。多个 Worker 可以并行等待 I/O，但端侧模型调用始终由共享 Broker 串行执行。
 
-本地预置版本使用以下已校验的二进制（584,417,280 bytes）：
+## 最小接入
 
-```text
-SHA-256: 1325ae366d31950f137c9c357b9fa89448b176d76998180c08ceaca78bba98be
+宿主先准备至少一个 `ModelProvider` 和根 Agent，再创建客户端：
+
+```kotlin
+val client = EdgeAgentSdk.create(
+    applicationContext,
+    AgentSdkConfig(
+        rootAgent = AgentDefinition(
+            id = AgentId("root"),
+            name = "root_agent",
+            description = "根 Agent",
+            instructions = "先核验工具和 Worker 证据，再给出唯一最终答复。",
+            preferredModelId = ModelId("gemma3-local"),
+            capabilityAllowlist = setOf(CapabilityId("device.read_status")),
+        ),
+        modelProviders = listOf(localModelProvider),
+        toolProviders = listOf(deviceToolProvider),
+    ),
+)
+
+val handle = client.submit(
+    AgentRequest(
+        input = "检查设备状态并总结",
+        modelPolicy = ModelPolicy.LOCAL_ONLY,
+        privacyLevel = PrivacyLevel.LOCAL_ONLY,
+    )
+)
+handle.events.collect { event -> render(event) }
 ```
 
-Gemma 模型受 Gemma 许可约束。构建者必须先登录 Hugging Face、阅读并接受许可，再把文件放到以下本机路径：
+`submit` 会先持久化 Run，再进入调度。重新进入页面可使用 `observe(runId)` 重放事件，使用 `snapshot(runId)` 恢复当前 Worker、审批、输入和 Artifact UI。HIGH 风险工具通过 `continueRun` 续跑：
+
+```kotlin
+client.continueRun(
+    runId,
+    UserContinuation.Approval(approvalId, ApprovalDecision.APPROVE_ONCE),
+)
+```
+
+完整的配置、Skill/MCP/A2A、安全、迁移和公共接口说明见 [Agent SDK 1.0 集成手册](docs/agent-sdk-1.0.md)。
+
+## 模型准备
+
+Demo 可内置许可批准后的 Gemma `.litertlm`。构建者必须自行接受 Gemma 许可，再把已校验模型放到：
 
 ```text
 app/src/main/assets/models/Gemma3-1B-IT_multi-prefill-seq_q4_ekv4096.litertlm
 ```
 
-该文件会被打进本机生成的 APK，但仍被 Git 忽略：它超过 GitHub 普通文件限制，且模型再分发需要由发布者履行 Gemma 许可义务。项目不会保存 Hugging Face Token。
+本机验收文件为 584,417,280 bytes，SHA-256：
 
-## 构建与运行
-
-环境要求：JDK 17、Android SDK 34，以及 Android 12+ ARM64 设备。
-
-```bash
-./gradlew :app:verifyBundledGemmaModel :app:assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+```text
+1325ae366d31950f137c9c357b9fa89448b176d76998180c08ceaca78bba98be
 ```
 
-运行步骤：
+模型被 `.gitignore` 排除，不得提交到仓库。首次启动会以 `.partial` + 原子移动安装到应用私有目录。
 
-1. 首次启动等待约 584 MB 内置模型复制完成；进度会显示在“模型”页。
-2. 应用自动尝试 GPU 初始化，失败时自动回退 CPU；无需手动点击初始化。
-3. 在“对话”页发送问题，观察同一条助手消息的流式更新。
-4. 切换飞行模式后继续对话，确认推理不依赖网络。
-5. 可在“模型”页手动替换模型、切换后端或重新初始化，并在“诊断”页记录指标。
+## 构建与验证
 
-GPU 模式需要 Manifest 中声明 `libvndksupport.so` 和 `libOpenCL.so`。两项均为 `required=false`；设备不提供兼容 OpenCL 时，应用会展示错误并回退 CPU。
-
-## 验证
+环境要求为 JDK 21、Android SDK 36；应用 `minSdk=31`、`targetSdk=34`，仅打包 `arm64-v8a`。
 
 ```bash
-openspec validate integrate-litert-lm-demo --strict
-./gradlew :app:assembleDebug testDebugUnitTest lintDebug assembleDebugAndroidTest
+./gradlew verifyAgentApiBoundary testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+./gradlew :app:verifyBundledGemmaModel :app:verifyLiteRtLmCoroutineAbi
+openspec validate build-agent-sdk-v1 --strict
 ```
 
-模拟器只用于导航、无模型状态和错误流程，不作为推理性能结论。最终验收必须在 Android 12+ ARM64 实机执行：重启恢复模型、GPU 成功或可观测回退、飞行模式流式回答、连续五轮、停止、清空、旋转、卸载再初始化，并确认诊断指标可读取。
+instrumentation APK 的编译不等于真机验收。发布前仍须在 Android 12+ ARM64 真机验证 GPU/CPU 回退、连续多任务、双模型内存压力、进程死亡、旋转、前后台切换、低内存回收、飞行模式、审批恢复和取消。
 
-## OpenSpec 工作流
+## 兼容与边界
 
-长期方案位于 [`openspec/changes/integrate-litert-lm-demo`](openspec/changes/integrate-litert-lm-demo)。实现和实机验收完成前不归档；验收后再将 delta specs 合并到 `openspec/specs/`。OpenSpec 使用说明见 [Fission-AI/OpenSpec](https://github.com/Fission-AI/OpenSpec)。
-
-## 已知限制
-
-- 仅支持 ARM64 和 Android 12+。
-- 内置模型会使 APK 增大约 584 MB；首次安装至少需要同时容纳 APK 和应用私有模型副本，并预留导入安全空间。
-- 第一阶段最大输出为 512 Token，采样参数固定为 `topK=10`、`topP=0.95`、`temperature=0.8`。
-- 性能和 GPU 可用性取决于设备、驱动、内存与模型；不设置跨设备统一阈值。
-- BenchmarkInfo 在 LiteRT-LM 0.15.0 中属于实验性 API，升级 SDK 必须单独创建并验证 OpenSpec change。
-- 模型文件、`.partial`、Token、本机路径和构建产物均被 Git 忽略。
+- 旧 `EdgeAiRuntime.generate()` 在 1.x 保留并标记废弃，内部转发到新 Agent 路径。
+- MCP 与 A2A 只实现 Client，不在 Android 上启动 stdio 子进程或对外提供 Server。
+- `LOCAL_ONLY` 同时约束模型、MCP/A2A 和标记为 `local=false` 的 Tool；不会静默回退云端。
+- 不支持任意 Shell、Root、未授权 Accessibility、公共路径 Skill 或未隔离动态代码。
+- 长期记忆默认仅在本机，云同步和跨设备记忆不属于 1.0。

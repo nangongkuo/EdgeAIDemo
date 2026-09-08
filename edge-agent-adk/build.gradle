@@ -1,0 +1,23 @@
+plugins {
+  id 'com.android.library'
+  id 'org.jetbrains.kotlin.android'
+  id 'org.jetbrains.kotlin.plugin.serialization'
+}
+
+android {
+  namespace 'com.zjf.edgeai.agent.adk'
+  compileSdk rootProject.ext.android.compileSdkVersion
+  defaultConfig { minSdk rootProject.ext.android.minSdkVersion; consumerProguardFiles 'consumer-rules.pro' }
+  compileOptions { sourceCompatibility JavaVersion.VERSION_21; targetCompatibility JavaVersion.VERSION_21 }
+  kotlinOptions { jvmTarget = '21' }
+  packaging { resources { merges += ['META-INF/INDEX.LIST', 'META-INF/DEPENDENCIES'] } }
+}
+kotlin { jvmToolchain(21) }
+
+dependencies {
+  implementation project(':edge-agent-api')
+  implementation project(':edge-agent-core')
+  implementation "com.google.adk:google-adk-kotlin-core:$rootProject.ext.adkKotlinVersion"
+  testImplementation 'junit:junit:4.13.2'
+  testImplementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:$rootProject.ext.coroutinesVersion"
+}
